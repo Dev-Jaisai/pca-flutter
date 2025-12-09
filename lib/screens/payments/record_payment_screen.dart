@@ -50,11 +50,14 @@ class _RecordPaymentScreenState extends State<RecordPaymentScreen> {
       EventBus().fire(PlayerEvent('installment_updated'));
 
       // Notify caller and close
+      if (!mounted) return;
       Navigator.of(context).pop(true);
 
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Payment recorded')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Payment recorded')));
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Record failed: $e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Record failed: $e')));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -63,43 +66,97 @@ class _RecordPaymentScreenState extends State<RecordPaymentScreen> {
   @override
   Widget build(BuildContext context) {
     final currencyHint = widget.remainingAmount != null ? 'Remaining: ₹${widget.remainingAmount!.toStringAsFixed(2)}' : null;
+    const bg = Color(0xFFFBF8FF);
+    const accent = Color(0xFF9B6CFF);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Record Payment')),
+      backgroundColor: bg,
+      appBar: AppBar(
+        title: const Text('Record Payment'),
+        elevation: 0,
+        backgroundColor: Colors.transparent,
+        foregroundColor: Colors.black87,
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: _loading
             ? const Center(child: CircularProgressIndicator())
-            : Form(
-          key: _formKey,
+            : SingleChildScrollView(
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              TextFormField(
-                controller: _amountCtl,
-                decoration: InputDecoration(labelText: 'Amount', helperText: currencyHint),
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                validator: (v) {
-                  final n = double.tryParse(v ?? '');
-                  if (n == null || n <= 0) return 'Enter valid amount';
-                  if (widget.remainingAmount != null && n > widget.remainingAmount!) return 'Amount exceeds remaining';
-                  return null;
-                },
+              // small intro card
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 12, offset: const Offset(0, 8))],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Record Payment', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                    if (currencyHint != null) ...[
+                      const SizedBox(height: 8),
+                      Text(currencyHint, style: const TextStyle(color: Colors.black54)),
+                    ],
+                  ],
+                ),
               ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _methodCtl,
-                decoration: const InputDecoration(labelText: 'Payment Method (e.g. UPI, Cash)'),
+              const SizedBox(height: 16),
+
+              // form card
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 12, offset: const Offset(0, 8))],
+                ),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    children: [
+                      TextFormField(
+                        controller: _amountCtl,
+                        decoration: InputDecoration(labelText: 'Amount', helperText: currencyHint),
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        validator: (v) {
+                          final n = double.tryParse(v ?? '');
+                          if (n == null || n <= 0) return 'Enter valid amount';
+                          if (widget.remainingAmount != null && n > widget.remainingAmount!) return 'Amount exceeds remaining';
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        controller: _methodCtl,
+                        decoration: const InputDecoration(labelText: 'Payment Method (e.g. UPI, Cash)'),
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        controller: _refCtl,
+                        decoration: const InputDecoration(labelText: 'Reference (optional)'),
+                      ),
+                      const SizedBox(height: 20),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: _submit,
+                          style: ButtonStyle(
+                            backgroundColor: MaterialStateProperty.all(accent),
+                            padding: MaterialStateProperty.all(const EdgeInsets.symmetric(vertical: 14)),
+                            shape: MaterialStateProperty.all(RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                            elevation: MaterialStateProperty.all(8),
+                          ),
+                          child: const Text('Record Payment', style: TextStyle(fontWeight: FontWeight.w700)),
+                        ),
+                      )
+                    ],
+                  ),
+                ),
               ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _refCtl,
-                decoration: const InputDecoration(labelText: 'Reference (optional)'),
-              ),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(onPressed: _submit, child: const Text('Record Payment')),
-              )
             ],
           ),
         ),

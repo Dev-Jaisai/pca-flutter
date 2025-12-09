@@ -1,10 +1,11 @@
+// lib/screens/home_screen.dart
 import 'package:flutter/material.dart';
 import '../../models/player.dart';
 import '../../models/installment_status.dart';
 import '../../services/api_service.dart';
 import '../installments/installments_screen.dart';
 import 'add_player_screen.dart';
-import '../../utils/event_bus.dart'; // Add this import
+import '../../utils/event_bus.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -96,89 +97,181 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final bg = const Color(0xFFFBF8FF);
+    final cardRadius = 14.0;
+    final accent = const Color(0xFF9B6CFF);
+
     if (_loading) {
       return Scaffold(
+        backgroundColor: bg,
         appBar: AppBar(title: const Text('Players')),
         body: const Center(child: CircularProgressIndicator()),
+        floatingActionButton: FloatingActionButton.extended(
+          onPressed: _openAddPlayerForm,
+          icon: const Icon(Icons.add),
+          label: const Text('Add Player'),
+        ),
       );
     }
-    if (_error != null) return Scaffold(appBar: AppBar(title: const Text('Players')), body: Center(child: Text('Error: $_error')));
+    if (_error != null) {
+      return Scaffold(
+        backgroundColor: bg,
+        appBar: AppBar(title: const Text('Players')),
+        body: Center(child: Text('Error: $_error')),
+        floatingActionButton: FloatingActionButton.extended(
+          onPressed: _openAddPlayerForm,
+          icon: const Icon(Icons.add),
+          label: const Text('Add Player'),
+        ),
+      );
+    }
 
     return Scaffold(
+      backgroundColor: bg,
       appBar: AppBar(
         title: const Text('Players'),
-        actions: [IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh))],
+        actions: [
+          IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh)),
+        ],
       ),
-      body: ListView.separated(
-        itemCount: _players.length,
-        separatorBuilder: (_, __) => const Divider(height: 1),
-        itemBuilder: (context, index) {
-          final p = _players[index];
-          final hasInstallments = _installmentMap[p.id] ?? false;
+      body: RefreshIndicator(
+        onRefresh: _refresh,
+        edgeOffset: 80,
+        color: accent,
+        child: ListView.builder(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+          itemCount: _players.length,
+          itemBuilder: (context, index) {
+            final p = _players[index];
+            final hasInstallments = _installmentMap[p.id] ?? false;
 
-          return ListTile(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            title: Text(p.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-            subtitle: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if ((p.group ?? '').isNotEmpty) Text(p.group!, style: const TextStyle(fontSize: 13)),
-                Text(p.phone ?? '', style: const TextStyle(fontSize: 13)),
-                const SizedBox(height: 6),
-                if (!hasInstallments)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.red.shade50,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text('No installments', style: TextStyle(color: Colors.red.shade700, fontSize: 12)),
-                  ),
-              ],
-            ),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.list_alt_outlined),
-                  tooltip: 'Installments',
-                  onPressed: () async {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Material(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(cardRadius),
+                elevation: 6,
+                shadowColor: Colors.black12,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(cardRadius),
+                  onTap: () async {
+                    // open installments by tapping the card (same behavior as before for the icon)
                     final changed = await Navigator.push<bool>(
                       context,
                       MaterialPageRoute(builder: (_) => InstallmentsScreen(player: p)),
                     );
                     if (changed == true) _refresh();
                   },
-                ),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+                    child: Row(
+                      children: [
+                        // avatar / initials
+                        CircleAvatar(
+                          radius: 28,
+                          backgroundColor: Colors.grey.shade100,
+                          backgroundImage: (p.photoUrl != null && p.photoUrl!.isNotEmpty) ? NetworkImage(p.photoUrl!) : null,
+                          child: (p.photoUrl == null || p.photoUrl!.isEmpty)
+                              ? Text(_initials(p.name), style: const TextStyle(fontWeight: FontWeight.w700, color: Colors.black87))
+                              : null,
+                        ),
 
-                if (!hasInstallments)
-                  IconButton(
-                    icon: const Icon(Icons.add_circle_outline, color: Colors.deepPurple),
-                    tooltip: 'Create installment',
-                    onPressed: () async {
-                      final created = await Navigator.push<bool>(
-                        context,
-                        MaterialPageRoute(builder: (_) => InstallmentsScreen(player: p)),
-                      );
-                      if (created == true) _refresh();
-                    },
+                        const SizedBox(width: 12),
+
+                        // main info
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(p.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                              const SizedBox(height: 6),
+                              Row(
+                                children: [
+                                  if ((p.group ?? '').isNotEmpty)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: Colors.grey.shade100,
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Text(p.group!, style: const TextStyle(fontSize: 12, color: Colors.black87)),
+                                    ),
+                                  const SizedBox(width: 8),
+                                  Text(p.phone ?? '', style: const TextStyle(fontSize: 13, color: Colors.black54)),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              // optional small note row
+                              if (p.notes != null && p.notes!.isNotEmpty)
+                                Text(p.notes!, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, color: Colors.black54)),
+                            ],
+                          ),
+                        ),
+
+                        const SizedBox(width: 8),
+
+                        // action column
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // installments / view button
+                            IconButton(
+                              icon: const Icon(Icons.list_alt_outlined),
+                              tooltip: 'Installments',
+                              onPressed: () async {
+                                final changed = await Navigator.push<bool>(
+                                  context,
+                                  MaterialPageRoute(builder: (_) => InstallmentsScreen(player: p)),
+                                );
+                                if (changed == true) _refresh();
+                              },
+                            ),
+
+                            const SizedBox(height: 4),
+
+                            // create installment shortcut (if no installments)
+                            if (!hasInstallments)
+                              IconButton(
+                                icon: const Icon(Icons.add_circle_outline, color: Color(0xFF9B6CFF)),
+                                tooltip: 'Create installment',
+                                onPressed: () async {
+                                  final created = await Navigator.push<bool>(
+                                    context,
+                                    MaterialPageRoute(builder: (_) => InstallmentsScreen(player: p)),
+                                  );
+                                  if (created == true) _refresh();
+                                },
+                              ),
+
+                            // delete
+                            IconButton(
+                              icon: const Icon(Icons.delete, color: Colors.redAccent),
+                              onPressed: () => _confirmDelete(p.id, p.name),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
-
-                IconButton(
-                    icon: const Icon(Icons.delete, color: Colors.redAccent),
-                    onPressed: () => _confirmDelete(p.id, p.name)
                 ),
-              ],
-            ),
-          );
-        },
+              ),
+            );
+          },
+        ),
       ),
-
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _openAddPlayerForm,
         icon: const Icon(Icons.add),
         label: const Text('Add Player'),
+        backgroundColor: accent,
       ),
     );
+  }
+
+  String _initials(String? name) {
+    if (name == null || name.trim().isEmpty) return '';
+    final parts = name.trim().split(RegExp(r'\s+'));
+    if (parts.length == 1) return parts.first.substring(0, 1).toUpperCase();
+    return (parts[0][0] + parts[1][0]).toUpperCase();
   }
 }

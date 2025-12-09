@@ -1,228 +1,217 @@
-// lib/widgets/dashboard_stats.dart
-import 'dart:async';
+// lib/screens/landing_screen.dart
 import 'package:flutter/material.dart';
-import '../../models/player_installment_summary.dart';
-import '../../services/api_service.dart';
-import '../../utils/event_bus.dart';
+import '../../widgets/dashboard_stats.dart';
+import '../home/add_player_screen.dart'; // adjust or remove if you already have route handling
 
+class LandingScreen extends StatelessWidget {
+  const LandingScreen({super.key});
 
-class DashboardStats extends StatefulWidget {
-  const DashboardStats({super.key});
-
-  @override
-  DashboardStatsState createState() => DashboardStatsState();
-}
-
-class DashboardStatsState extends State<DashboardStats> {
-  int _totalPlayers = 0;
-  int _currentMonthDue = 0;
-  int _pendingPayments = 0;
-  int _overdue = 0;
-  bool _loading = true;
-  late StreamSubscription<PlayerEvent> _playerEventsSubscription;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadStats();
-
-    // Listen to global events (player/installation/payment)
-    _playerEventsSubscription = EventBus().stream.listen((event) {
-      if (event.action == 'added' ||
-          event.action == 'deleted' ||
-          event.action == 'updated' ||
-          event.action == 'installment_created' ||
-          event.action == 'installment_deleted' ||
-          event.action == 'payment_recorded') {
-        debugPrint('DashboardStats: Received ${event.action} event, refreshing...');
-        _loadStats();
-      }
-    });
+  void _openAddPlayer(BuildContext context) {
+    // Replace with your existing navigation logic
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const AddPlayerScreen()));
   }
 
   @override
-  void dispose() {
-    _playerEventsSubscription.cancel();
-    super.dispose();
-  }
+  Widget build(BuildContext context) {
+    // page-level colors / tokens (easy to tweak)
+    const bg = Color(0xFFFBF8FF);
+    const cardBg = Colors.white;
+    const accent = Color(0xFF9B6CFF);
 
-  // Public method to refresh stats
-  Future<void> refreshStats() async => await _loadStats();
-
-  /// Normalize backend status strings into canonical forms:
-  /// - "PARTIALLY_PAID", "Partially Paid", "partially_paid" -> "partially paid"
-  /// - "PENDING" / "Pending" -> "pending"
-  /// - "NO_INSTALLMENT" -> "no installment"
-  String _normalizeStatus(String? s) {
-    if (s == null) return '';
-    return s.toLowerCase().replaceAll('_', ' ').trim();
-  }
-
-  /// Call backend endpoint to get latest year/month. Fallback to current month if API fails.
-  Future<String> _getTargetYearMonth() async {
-    try {
-      final latest = await ApiService.fetchLatestInstallmentMonth();
-      if (latest != null && latest['year'] != null && latest['month'] != null) {
-        final int year = latest['year'] as int;
-        final int month = latest['month'] as int;
-        final monthStr = '${year}-${month.toString().padLeft(2, '0')}';
-        debugPrint('DashboardStats: latest month from API = $monthStr');
-        return monthStr;
-      }
-    } catch (e) {
-      debugPrint('DashboardStats: fetchLatestInstallmentMonth failed: $e');
-    }
-
-    // fallback: current month
-    final now = DateTime.now();
-    final fallback = '${now.year}-${now.month.toString().padLeft(2, '0')}';
-    debugPrint('DashboardStats: using fallback month = $fallback');
-    return fallback;
-  }
-
-  Future<void> _loadStats() async {
-    if (mounted) setState(() => _loading = true);
-
-    try {
-      // determine which month to load (use latest-month endpoint if available)
-      final targetMonth = await _getTargetYearMonth();
-
-      // fetch month summary for the target month
-      List<PlayerInstallmentSummary> monthSummary = <PlayerInstallmentSummary>[];
-      try {
-        monthSummary = await ApiService.fetchInstallmentSummary(targetMonth);
-      } catch (e) {
-        debugPrint('DashboardStats: fetchInstallmentSummary failed for $targetMonth: $e');
-        monthSummary = <PlayerInstallmentSummary>[];
-      }
-
-      // fetch all players
-      List<dynamic> playersRaw = <dynamic>[];
-      try {
-        playersRaw = await ApiService.fetchPlayers();
-      } catch (e) {
-        debugPrint('DashboardStats: fetchPlayers failed: $e');
-        playersRaw = <dynamic>[];
-      }
-
-      // Debug: print a summary of what we received
-      debugPrint('DashboardStats: monthSummary count=${monthSummary.length} for $targetMonth');
-      for (final item in monthSummary) {
-        debugPrint(
-            'SUMMARY ROW: player=${item.playerName} id=${item.playerId} status=${item.status} due=${item.dueDate} amount=${item.installmentAmount} paid=${item.totalPaid}');
-      }
-
-      // Decide whether to count NO_INSTALLMENT as due.
-      // Set to true if you want players with no installment to be considered "This Month Due".
-      const bool includeNoInstallmentAsDue = false;
-
-      // compute stats with normalization & null safety
-      final int totalPlayers = playersRaw.length;
-
-      int currentMonthDue = 0;
-      int pendingPayments = 0;
-      int overdueCount = 0;
-      final now = DateTime.now();
-
-      for (final item in monthSummary) {
-        final st = _normalizeStatus(item.status);
-
-        // current month due: pending or partially paid (and optionally no_installment)
-        if (st.isNotEmpty) {
-          if (st == 'no installment') {
-            if (includeNoInstallmentAsDue) currentMonthDue++;
-          } else if (st == 'pending' || st == 'partially paid') {
-            currentMonthDue++;
-          }
-          if (st == 'pending') pendingPayments++;
-        }
-
-        // overdue: dueDate before now and not fully paid
-        final due = item.dueDate;
-        if (due != null && due.isBefore(now) && st != 'paid') {
-          overdueCount++;
-        }
-      }
-
-      if (mounted) {
-        setState(() {
-          _totalPlayers = totalPlayers;
-          _currentMonthDue = currentMonthDue;
-          _pendingPayments = pendingPayments;
-          _overdue = overdueCount;
-        });
-        debugPrint(
-            'DashboardStats: Updated - Total Players: $_totalPlayers, Due: $_currentMonthDue, Pending: $_pendingPayments, Overdue: $_overdue');
-      }
-    } catch (e, st) {
-      debugPrint('DashboardStats: unexpected error: $e\n$st');
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Widget _statCard(String title, int value, Color color, IconData icon) {
-    return Card(
-      elevation: 3,
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: color, size: 28),
-            const SizedBox(height: 8),
-            Text(
-              value.toString(),
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                color: color,
+    return Scaffold(
+      backgroundColor: bg,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        foregroundColor: Colors.black87,
+        title: const Text('PCA Dashboard', style: TextStyle(fontWeight: FontWeight.w700)),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.search_outlined),
+            onPressed: () {},
+          )
+        ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _openAddPlayer(context),
+        backgroundColor: accent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        child: const Icon(Icons.add, size: 28),
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Welcome header
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: const [
+                        Text('Welcome, Coach',
+                            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                        SizedBox(height: 6),
+                        Text('Manage players, fees, installments and payments',
+                            style: TextStyle(color: Colors.black54)),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    width: 46,
+                    height: 46,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(colors: [accent.withOpacity(0.9), accent]),
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0,4))],
+                    ),
+                    child: IconButton(
+                      icon: const Icon(Icons.edit, color: Colors.white),
+                      onPressed: () {},
+                    ),
+                  )
+                ],
               ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              title,
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
-              textAlign: TextAlign.center,
-            ),
+
+              const SizedBox(height: 18),
+
+              // DashboardStats (YOUR original widget inserted unchanged)
+              const DashboardStats(),
+
+              const SizedBox(height: 22),
+
+              // Quick action / feature row (horizontal cards)
+              const Text('Highlights', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 140,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  children: [
+                    _featureCard(
+                      title: 'Players',
+                      subtitle: 'View all players, add or delete players',
+                      icon: Icons.group,
+                      onTap: () {
+                        // navigate to players screen
+                        Navigator.pushNamed(context, '/players');
+                      },
+                    ),
+                    _featureCard(
+                      title: 'All Installments',
+                      subtitle: 'Month-wise installments (not filtered)',
+                      icon: Icons.calendar_month,
+                      onTap: () {
+                        Navigator.pushNamed(context, '/installments');
+                      },
+                    ),
+                    _featureCard(
+                      title: 'Groups',
+                      subtitle: 'Create & manage player groups',
+                      icon: Icons.layers,
+                      onTap: () {
+                        Navigator.pushNamed(context, '/groups');
+                      },
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 18),
+
+              // Quick list tiles (navigation)
+              _sectionTile(
+                context,
+                icon: Icons.people_alt_outlined,
+                title: 'Players',
+                subtitle: 'View all players, add or delete players',
+                onTap: () => Navigator.pushNamed(context, '/players'),
+              ),
+              const SizedBox(height: 12),
+              _sectionTile(
+                context,
+                icon: Icons.receipt_long,
+                title: 'All Installments',
+                subtitle: 'View players with their installments',
+                onTap: () => Navigator.pushNamed(context, '/installments'),
+              ),
+              const SizedBox(height: 12),
+              _sectionTile(
+                context,
+                icon: Icons.group_work_outlined,
+                title: 'Groups',
+                subtitle: 'Create and manage player groups',
+                onTap: () => Navigator.pushNamed(context, '/groups'),
+              ),
+
+              const SizedBox(height: 36),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _featureCard({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    const Gradient g = LinearGradient(colors: [Color(0xFFBFD8FF), Color(0xFF60A5FA)]);
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 220,
+        margin: const EdgeInsets.only(right: 12),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          gradient: g,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 16, offset: Offset(0,10))],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(10)),
+                child: Icon(icon, color: Colors.white, size: 18),
+              ),
+              const Spacer(),
+              const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.white70),
+            ]),
+            const Spacer(),
+            Text(title, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 6),
+            Text(subtitle, style: const TextStyle(color: Colors.white70, fontSize: 12)),
           ],
         ),
       ),
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    if (_loading) {
-      return const SizedBox(
-        height: 140,
-        child: Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Quick Stats',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+  Widget _sectionTile(BuildContext context,
+      {required IconData icon, required String title, required String subtitle, required VoidCallback onTap}) {
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(12),
+      elevation: 3,
+      child: ListTile(
+        onTap: onTap,
+        leading: Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(color: const Color(0xFFF1F3FF), borderRadius: BorderRadius.circular(10)),
+          child: Icon(icon, color: const Color(0xFF6067FF)),
         ),
-        const SizedBox(height: 12),
-        GridView.count(
-          crossAxisCount: 2,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          childAspectRatio: 1.3,
-          mainAxisSpacing: 12,
-          crossAxisSpacing: 12,
-          children: [
-            _statCard('Total Players', _totalPlayers, Colors.blue, Icons.people),
-            _statCard('This Month Due', _currentMonthDue, Colors.orange, Icons.calendar_month),
-            _statCard('Pending', _pendingPayments, Colors.red, Icons.pending),
-            _statCard('Overdue', _overdue, Colors.deepPurple, Icons.warning),
-          ],
-        ),
-      ],
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
+        subtitle: Text(subtitle),
+        trailing: const Icon(Icons.chevron_right),
+      ),
     );
   }
 }

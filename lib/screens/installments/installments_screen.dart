@@ -42,142 +42,208 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
   @override
   Widget build(BuildContext context) {
     final df = DateFormat('dd MMM yyyy');
+    final bg = const Color(0xFFFBF8FF);
+    final accent = const Color(0xFF9B6CFF);
+
     return Scaffold(
-      appBar: AppBar(title: Text('${widget.player.name} — Installments')),
+      backgroundColor: bg,
+      appBar: AppBar(
+        title: Text('${widget.player.name} — Installments'),
+        elevation: 0,
+        backgroundColor: Colors.transparent,
+        foregroundColor: Colors.black87,
+      ),
       body: FutureBuilder<List<Installment>>(
         future: _futureInstallments,
         builder: (context, snap) {
-          if (snap.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-          if (snap.hasError) return Center(child: Text('Error: ${snap.error}'));
+          if (snap.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snap.hasError) {
+            return Center(child: Text('Error: ${snap.error}'));
+          }
+
           final list = snap.data ?? [];
-          if (list.isEmpty) return const Center(child: Text('No installments found'));
-          return ListView.separated(
-            itemCount: list.length,
-            separatorBuilder: (_, __) => const Divider(),
-            itemBuilder: (context, i) {
-              final it = list[i];
+          if (list.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: const [
+                  Icon(Icons.calendar_month_outlined, size: 56, color: Colors.black26),
+                  SizedBox(height: 12),
+                  Text('No installments found', style: TextStyle(color: Colors.black54)),
+                ],
+              ),
+            );
+          }
 
-              // compute whether fully paid
-              final double remaining = (it.remainingAmount ?? it.amount ?? 0.0);
-              final bool isPaid = remaining <= 0.0;
+          return RefreshIndicator(
+            onRefresh: () async {
+              _load();
+              await _futureInstallments;
+            },
+            color: accent,
+            child: ListView.separated(
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+              itemCount: list.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              itemBuilder: (context, i) {
+                final it = list[i];
 
-              return ListTile(
-                title: Text(
-                  '${it.periodMonth ?? '-'} / ${it.periodYear ?? '-'}  •  ${it.status ?? 'N/A'}',
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 6),
-                    Text(
-                      'Amount: ${it.amount?.toStringAsFixed(2) ?? '-'}'
-                          '  Paid: ${it.paidAmount?.toStringAsFixed(2) ?? '0.00'}',
-                    ),
-                    if (it.dueDate != null) Text('Due: ${df.format(it.dueDate!)}'),
-                    const SizedBox(height: 8),
+                // compute whether fully paid
+                final double remaining = (it.remainingAmount ?? it.amount ?? 0.0);
+                final bool isPaid = remaining <= 0.0;
 
-                    // PAID badge when fully paid
-                    if (isPaid)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8.0),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.green.shade50,
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: Colors.green.shade200),
-                          ),
-                          child: const Text(
-                            'PAID',
-                            style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                      ),
+                // friendly status text
+                final statusText = it.status ?? 'N/A';
+                final period = '${it.periodMonth ?? '-'} / ${it.periodYear ?? '-'}';
 
-                    // Action row
-                    Row(
+                return Material(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  elevation: 6,
+                  shadowColor: Colors.black12,
+                  child: Container(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // View Payments
-                        TextButton.icon(
-                          style: TextButton.styleFrom(
-                            foregroundColor: Colors.deepPurple, // icon + label color
-                          ),
-                          icon: const Icon(Icons.receipt_long, size: 18),
-                          label: const Text('Payments'),
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => PaymentsListScreen(
-                                  installmentId: it.id, // use id (int) from model
-                                  remainingAmount: remaining,
-                                ),
+                        // header row: period, status, paid badge
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                '$period  •  $statusText',
+                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
                               ),
-                            );
-                          },
-                        ),
-
-                        const SizedBox(width: 10),
-
-                        // Record Payment (disabled when fully paid)
-                        TextButton.icon(
-                          style: TextButton.styleFrom(
-                            foregroundColor: isPaid ? Colors.grey : Colors.deepPurple,
-                          ),
-                          icon: Icon(Icons.add_card, size: 18, color: isPaid ? Colors.grey : Colors.deepPurple),
-                          label: Text(
-                            'Record',
-                            style: TextStyle(
-                              color: isPaid ? Colors.grey : Colors.deepPurple,
-                              fontWeight: FontWeight.w600,
                             ),
-                          ),
-                          onPressed: isPaid
-                              ? null
-                              : () async {
-                            final result = await Navigator.push<bool>(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => RecordPaymentScreen(
-                                  installmentId: it.id,
-                                  remainingAmount: remaining,
+                            if (isPaid)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.shade50,
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: Colors.green.shade200),
+                                ),
+                                child: const Text('PAID', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+
+                        // amounts and due date
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Amount: ${it.amount?.toStringAsFixed(2) ?? '-'}', style: const TextStyle(fontSize: 13)),
+                                  const SizedBox(height: 6),
+                                  Text('Paid: ${it.paidAmount?.toStringAsFixed(2) ?? '0.00'}', style: const TextStyle(fontSize: 13)),
+                                ],
+                              ),
+                            ),
+                            if (it.dueDate != null)
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  const Text('Due', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                                  const SizedBox(height: 4),
+                                  Text(df.format(it.dueDate!), style: const TextStyle(fontWeight: FontWeight.w600)),
+                                ],
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+
+                        // action row
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => PaymentsListScreen(
+                                        installmentId: it.id,
+                                        remainingAmount: remaining,
+                                      ),
+                                    ),
+                                  );
+                                },
+                                icon: const Icon(Icons.receipt_long, size: 18),
+                                label: const Text('Payments'),
+                                style: OutlinedButton.styleFrom(
+                                  side: BorderSide(color: Colors.grey.shade200),
+                                  foregroundColor: accent,
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                                 ),
                               ),
-                            );
-                            if (result == true) _load();
-                          },
+                            ),
+                            const SizedBox(width: 12),
+                            SizedBox(
+                              width: 140,
+                              child: ElevatedButton.icon(
+                                onPressed: isPaid
+                                    ? null
+                                    : () async {
+                                  final result = await Navigator.push<bool>(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => RecordPaymentScreen(
+                                        installmentId: it.id,
+                                        remainingAmount: remaining,
+                                      ),
+                                    ),
+                                  );
+                                  if (result == true) _load();
+                                },
+                                icon: const Icon(Icons.add_card, size: 18),
+                                label: const Text('Record', style: TextStyle(fontWeight: FontWeight.w600)),
+                                style: ButtonStyle(
+                                  backgroundColor: MaterialStateProperty.resolveWith<Color?>((states) {
+                                    if (states.contains(MaterialState.disabled)) return Colors.grey.shade200;
+                                    return accent;
+                                  }),
+                                  foregroundColor: MaterialStateProperty.resolveWith<Color?>((states) {
+                                    if (states.contains(MaterialState.disabled)) return Colors.grey.shade500;
+                                    return Colors.white;
+                                  }),
+                                  elevation: MaterialStateProperty.resolveWith<double?>((states) {
+                                    if (states.contains(MaterialState.disabled)) return 0.0;
+                                    return 6.0;
+                                  }),
+                                  padding: MaterialStateProperty.all(const EdgeInsets.symmetric(vertical: 12)),
+                                  shape: MaterialStateProperty.all(RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                  ],
-                ),
-              );
-            },
+                  ),
+                );
+              },
+            ),
           );
         },
       ),
       floatingActionButton: Container(
         decoration: BoxDecoration(
-          color: Colors.deepPurple.shade400,
+          gradient: const LinearGradient(colors: [Color(0xFFBFA7FF), Color(0xFF9B6CFF)]),
           borderRadius: BorderRadius.circular(30),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black26,
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            )
-          ],
+          boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 10, offset: Offset(0, 4))],
         ),
         child: FloatingActionButton.extended(
-          backgroundColor: Colors.deepPurple.shade400,
+          backgroundColor: Colors.transparent,
           elevation: 0,
           onPressed: _openCreate,
           icon: const Icon(Icons.add, color: Colors.white),
-          label: const Text(
-            "Create Installment",
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-          ),
+          label: const Text('Create Installment', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         ),
       ),
     );
