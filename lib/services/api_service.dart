@@ -1,5 +1,6 @@
 // lib/services/api_service.dart
 import 'dart:convert';
+import 'package:flutter/cupertino.dart';
 import 'package:http/http.dart' as http;
 import '../models/InstallmentSummary.dart';
 import '../models/fee_structure.dart';
@@ -371,5 +372,29 @@ class ApiService {
       throw Exception('Failed to fetch latest month: ${resp.statusCode} - ${resp.body}');
     }
   }
+  // ADD THESE METHODS TO YOUR EXISTING ApiService class
+
+  static Future<List<FeeStructure>> fetchAllFees() async {
+    try {
+      // Since your backend doesn't have a "get all fees" endpoint,
+      // we'll fetch fees for each group individually
+      final groups = await fetchGroups();
+      final allFees = <FeeStructure>[];
+
+      for (final group in groups) {
+        try {
+          final fees = await fetchFeesByGroup(group.id);
+          allFees.addAll(fees);
+        } catch (e) {
+          debugPrint('Error fetching fees for group ${group.id}: $e');
+        }
+      }
+
+      return allFees;
+    } catch (e) {
+      throw Exception('Failed to load fees: $e');
+    }
+  }
+
 
 }
