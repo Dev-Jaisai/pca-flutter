@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Allow HTTP traffic to your AWS backend -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">pca-backend-env.eba-mzebaydc.ap-south-1.elasticbeanstalk.com</domain>
+        <domain includeSubdomains="true">eba-mzebaydc.ap-south-1.elasticbeanstalk.com</domain>
+        <domain includeSubdomains="true">ap-south-1.elasticbeanstalk.com</domain>
+    </domain-config>
+
+    <!-- Allow local/emulator traffic -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>

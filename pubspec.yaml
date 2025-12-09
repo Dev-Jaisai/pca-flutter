@@ -1,0 +1,36 @@
+name: textewidget
+description: "A new Flutter project."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.0.0  # Changed from ^3.10.3 (use version constraint instead of exact)
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.1.0
+  intl: ^0.17.0
+  cupertino_icons: ^1.0.8
+  rename: ^3.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.13.1
+  url_launcher: ^6.1.0  # ADD THIS LINE
+
+
+
+flutter:
+  uses-material-design: true
+
+  # Assets should be here, not in dependencies
+  assets:
+    - assets/images/logo.png
+    - assets/images/cricket_intro.png
+flutter_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/app_icon.png"
