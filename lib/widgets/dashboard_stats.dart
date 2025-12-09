@@ -283,6 +283,10 @@ class DashboardStatsState extends State<DashboardStats> with TickerProviderState
       return const SizedBox(height: 160, child: Center(child: CircularProgressIndicator()));
     }
 
+    // Helper to get current month string "YYYY-MM"
+    final now = DateTime.now();
+    final currentMonth = '${now.year}-${now.month.toString().padLeft(2, '0')}';
+
     final configs = [
       {
         'title': 'Total Players',
@@ -290,7 +294,6 @@ class DashboardStatsState extends State<DashboardStats> with TickerProviderState
         'icon': Icons.people,
         'gradient': [Colors.blue.shade400, Colors.blue.shade200],
         'accent': Colors.blue.shade50,
-        // ACTION 1: Navigate to Players List
         'onTap': () => Navigator.pushNamed(context, '/players'),
       },
       {
@@ -299,8 +302,8 @@ class DashboardStatsState extends State<DashboardStats> with TickerProviderState
         'icon': Icons.calendar_month,
         'gradient': [Colors.orange.shade400, Colors.orange.shade200],
         'accent': Colors.orange.shade50,
-        // ACTION 2: You can add navigation for other cards here if needed
-        'onTap': () {},
+        // ACTION: Open Summary for Current Month
+        'onTap': () => Navigator.pushNamed(context, '/installment-summary', arguments: currentMonth),
       },
       {
         'title': 'Pending',
@@ -308,7 +311,8 @@ class DashboardStatsState extends State<DashboardStats> with TickerProviderState
         'icon': Icons.pending,
         'gradient': [Colors.red.shade400, Colors.red.shade200],
         'accent': Colors.red.shade50,
-        'onTap': () {},
+        // ACTION: Open Summary for Current Month
+        'onTap': () => Navigator.pushNamed(context, '/installment-summary', arguments: currentMonth),
       },
       {
         'title': 'Overdue',
@@ -316,7 +320,8 @@ class DashboardStatsState extends State<DashboardStats> with TickerProviderState
         'icon': Icons.warning,
         'gradient': [Colors.purple.shade400, Colors.purple.shade200],
         'accent': Colors.purple.shade50,
-        'onTap': () {},
+        // ACTION: Open Summary for Current Month
+        'onTap': () => Navigator.pushNamed(context, '/installment-summary', arguments: currentMonth),
       },
     ];
 

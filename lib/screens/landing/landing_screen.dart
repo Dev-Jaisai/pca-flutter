@@ -1,11 +1,43 @@
+// lib/screens/landing/landing_screen.dart
 import 'package:flutter/material.dart';
-import '../home/home_screen.dart';
 import '../home/add_player_screen.dart';
 import '../../widgets/dashboard_stats.dart';
 import '../installments/installment_summary_screen.dart';
 
-class LandingScreen extends StatelessWidget {
+class LandingScreen extends StatefulWidget {
   const LandingScreen({super.key});
+
+  @override
+  State<LandingScreen> createState() => _LandingScreenState();
+}
+
+class _LandingScreenState extends State<LandingScreen> {
+  // path and provider for background
+  final String _bgPath = 'assets/images/cricket_bg.webp';
+  late ImageProvider _bgImage;
+
+  @override
+  void initState() {
+    super.initState();
+    // temporary fallback provider — will be replaced in didChangeDependencies with ResizeImage
+    _bgImage = AssetImage(_bgPath);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // compute an appropriate cacheWidth to reduce decode cost
+    final mq = MediaQuery.of(context);
+    final devicePixelRatio = mq.devicePixelRatio;
+    final screenWidth = mq.size.width;
+    final cacheWidth = (screenWidth * devicePixelRatio).round();
+
+    // Use ResizeImage so Flutter decodes just what's needed
+    _bgImage = ResizeImage(const AssetImage('assets/images/cricket_bg.webp'), width: cacheWidth);
+
+    // Precache the resized image
+    precacheImage(_bgImage, context);
+  }
 
   void _open(BuildContext context, String routeName) {
     try {
@@ -16,6 +48,7 @@ class LandingScreen extends StatelessWidget {
       );
     }
   }
+
   Widget _card(
       BuildContext ctx, {
         required IconData icon,
@@ -31,9 +64,9 @@ class LandingScreen extends StatelessWidget {
       elevation: 4,
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
-        onTap: onTap, // Makes the whole card clickable
+        onTap: onTap, // whole card clickable
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), // Adjusted padding slightly
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Row(
             children: [
               Container(
@@ -50,20 +83,16 @@ class LandingScreen extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text(title,
-                        style: const TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.w600)),
+                    Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                     const SizedBox(height: 6),
-                    Text(subtitle,
-                        style: TextStyle(color: Colors.grey[700], fontSize: 13)),
+                    Text(subtitle, style: TextStyle(color: Colors.grey[700], fontSize: 13)),
                   ],
                 ),
               ),
-              // CHANGE IS HERE:
-              // We replaced Icon(...) with IconButton(...)
+              // chevron is an IconButton so it navigates too
               IconButton(
                 icon: const Icon(Icons.chevron_right, color: Colors.grey),
-                onPressed: onTap, // Calls the same navigation function
+                onPressed: onTap,
               ),
             ],
           ),
@@ -85,17 +114,9 @@ class LandingScreen extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.grey[300],
-                  borderRadius: BorderRadius.circular(4),
-                ),
-              ),
+              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(4))),
               const SizedBox(height: 12),
-              const Text('Quick actions',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              const Text('Quick actions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               ListTile(
                 leading: const Icon(Icons.person_add),
@@ -103,10 +124,7 @@ class LandingScreen extends StatelessWidget {
                 subtitle: const Text('Open add player form'),
                 onTap: () {
                   Navigator.pop(ctx);
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const AddPlayerScreen()),
-                  );
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const AddPlayerScreen()));
                 },
               ),
               ListTile(
@@ -115,8 +133,7 @@ class LandingScreen extends StatelessWidget {
                 subtitle: const Text('Generate monthly installments for all players'),
                 onTap: () {
                   Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                      content: Text('Installment generation triggered (demo)')));
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Installment generation triggered (demo)')));
                 },
               ),
               ListTile(
@@ -126,14 +143,8 @@ class LandingScreen extends StatelessWidget {
                 onTap: () {
                   Navigator.pop(ctx);
                   final now = DateTime.now();
-                  final currentMonth =
-                      '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}';
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) =>
-                            InstallmentSummaryScreen(initialMonth: currentMonth)),
-                  );
+                  final currentMonth = '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}';
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => InstallmentSummaryScreen(initialMonth: currentMonth)));
                 },
               ),
               const SizedBox(height: 8),
@@ -143,40 +154,45 @@ class LandingScreen extends StatelessWidget {
       },
     );
   }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
     return Scaffold(
-      // Floating button unchanged
       floatingActionButton: FloatingActionButton(
         onPressed: () => _showQuickActionsSheet(context),
         child: const Icon(Icons.add),
       ),
       body: Stack(
         children: [
-          // Background image
+          // Background image (uses pre-cached ResizeImage)
           Positioned.fill(
-            child: Image.asset(
-              'assets/images/cricket_bg.png',
+            child: Image(
+              image: _bgImage,
               fit: BoxFit.cover,
-              // subtle tint so text/cards remain readable
               color: Colors.white.withOpacity(0.86),
               colorBlendMode: BlendMode.modulate,
+              frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                if (wasSynchronouslyLoaded) return child;
+                return AnimatedOpacity(
+                  opacity: frame == null ? 0 : 1,
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeOut,
+                  child: child,
+                );
+              },
             ),
           ),
 
-          // top-to-bottom fade overlay for contrast
+          // subtle gradient overlay for contrast
           Positioned.fill(
             child: Container(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.white.withOpacity(0.0),
-                    Colors.white.withOpacity(0.75),
-                  ],
+                  colors: [Colors.white.withOpacity(0.0), Colors.white.withOpacity(0.85)],
                   stops: const [0.0, 0.9],
                 ),
               ),
@@ -196,32 +212,22 @@ class LandingScreen extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
-                              'Welcome, Coach',
-                              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                            ),
+                            const Text('Welcome, Coach', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                             const SizedBox(height: 6),
-                            Text(
-                              'Manage players, fees, installments and payments',
-                              style: TextStyle(color: Colors.grey[700]),
-                            ),
+                            Text('Manage players, fees, installments and payments', style: TextStyle(color: Colors.grey[700])),
                           ],
                         ),
                       ),
-                      CircleAvatar(
-                        radius: 22,
-                        backgroundColor: Colors.deepPurple.shade100,
-                        child: const Icon(Icons.sports_cricket, color: Colors.white),
-                      ),
+                      CircleAvatar(radius: 22, backgroundColor: Colors.deepPurple.shade100, child: const Icon(Icons.sports_cricket, color: Colors.white)),
                     ],
                   ),
                   const SizedBox(height: 18),
 
-                  // DashboardStats (unchanged)
+                  // Dashboard
                   const DashboardStats(),
                   const SizedBox(height: 20),
 
-                  // main list + quick actions
+                  // Feature cards + actions
                   Expanded(
                     child: ListView(
                       children: [
@@ -245,7 +251,7 @@ class LandingScreen extends StatelessWidget {
                           context,
                           icon: Icons.group_add,
                           title: 'Groups',
-                          subtitle: 'Create and manage player groups (Junior / Senior ...)',
+                          subtitle: 'Create & manage player groups (Junior / Senior ...)',
                           onTap: () => _open(context, '/groups'),
                           color: Colors.indigo,
                         ),
@@ -265,50 +271,24 @@ class LandingScreen extends StatelessWidget {
                           onTap: () => Navigator.pushNamed(context, '/sms-reminders'),
                           color: Colors.green,
                         ),
-
                         const SizedBox(height: 14),
 
-                        Text('Quick Actions',
-                            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+                        Text('Quick Actions', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
                         const SizedBox(height: 10),
-
                         Wrap(
                           spacing: 10,
                           runSpacing: 10,
                           children: [
-                            ActionChip(
-                              label: const Text('Add Player'),
-                              avatar: const Icon(Icons.add),
-                              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AddPlayerScreen())),
-                            ),
-                            ActionChip(
-                              label: const Text('Create Installment (all)'),
-                              avatar: const Icon(Icons.schedule),
-                              onPressed: () => _showQuickActionsSheet(context),
-                            ),
-                            ActionChip(
-                              label: const Text('View Players'),
-                              avatar: const Icon(Icons.list),
-                              onPressed: () => Navigator.pushNamed(context, '/players'),
-                            ),
-                            ActionChip(
-                              label: const Text('Payments'),
-                              avatar: const Icon(Icons.payment),
-                              onPressed: () {
-                                final now = DateTime.now();
-                                final currentMonth =
-                                    '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}';
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => InstallmentSummaryScreen(initialMonth: currentMonth),
-                                  ),
-                                );
-                              },
-                            ),
+                            ActionChip(label: const Text('Add Player'), avatar: const Icon(Icons.add), onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AddPlayerScreen()))),
+                            ActionChip(label: const Text('Create Installment (all)'), avatar: const Icon(Icons.schedule), onPressed: () => _showQuickActionsSheet(context)),
+                            ActionChip(label: const Text('View Players'), avatar: const Icon(Icons.list), onPressed: () => Navigator.pushNamed(context, '/players')),
+                            ActionChip(label: const Text('Payments'), avatar: const Icon(Icons.payment), onPressed: () {
+                              final now = DateTime.now();
+                              final currentMonth = '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}';
+                              Navigator.push(context, MaterialPageRoute(builder: (_) => InstallmentSummaryScreen(initialMonth: currentMonth)));
+                            }),
                           ],
                         ),
-
                         const SizedBox(height: 30),
                       ],
                     ),

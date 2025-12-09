@@ -14,7 +14,10 @@ dependencies:
   cupertino_icons: ^1.0.8
   rename: ^3.1.0
   url_launcher: ^6.1.0   # MUST BE inside dependencies, not dev_dependencies
-
+  shimmer: ^3.0.0
+  cached_network_image: ^3.3.0
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -26,7 +29,7 @@ flutter:
   assets:
     - assets/images/logo.png
     - assets/images/cricket_intro.png
-    - assets/images/cricket_bg.png
+    - assets/images/cricket_bg.webp   # UPDATED
 
 flutter_icons:
   android: true

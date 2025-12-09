@@ -1,7 +1,8 @@
-// lib/screens/add_player_screen.dart
+// lib/screens/home/add_player_screen.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import '../../models/group.dart';
 import '../../services/api_service.dart';
 import '../../utils/event_bus.dart';
@@ -26,23 +27,89 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
   DateTime? _joinDate;
   DateTime? _installmentDueDate;
   bool _isLoading = false;
+  bool _loadingGroups = true;
+
+  // fee map loaded from Hive: { 'Junior': 100.0, ... }
+  Map<String, double> _fees = {};
 
   @override
   void initState() {
     super.initState();
-    _loadGroups();
+    _loadGroupsAndFees();
   }
 
-  Future<void> _loadGroups() async {
+  Future<void> _loadGroupsAndFees() async {
+    setState(() => _loadingGroups = true);
+    final box = Hive.box('app_cache');
+
+    // 1) Try Hive cache first
     try {
-      final g = await ApiService.fetchGroups();
-      setState(() {
-        _groups = g;
-        if (_groups.isNotEmpty) _selectedGroupId = _groups.first.id;
-      });
+      final cachedGroups = box.get('groups_list', defaultValue: []);
+      if (cachedGroups is List && cachedGroups.isNotEmpty) {
+        final parsed = cachedGroups.map((json) {
+          try {
+            if (json is Map<String, dynamic>) return Group.fromJson(json);
+            if (json is Map) return Group.fromJson(Map<String, dynamic>.from(json));
+            return null;
+          } catch (_) {
+            return null;
+          }
+        }).whereType<Group>().toList();
+
+        if (parsed.isNotEmpty) {
+          setState(() {
+            _groups = parsed;
+            _validateSelection(); // Safe check
+          });
+        }
+      }
     } catch (e) {
-      // keep empty if API fails; UI will show empty dropdown
-      setState(() {});
+      debugPrint('AddPlayerScreen: failed to read cached groups: $e');
+    }
+
+    // 2) Try API for latest groups
+    try {
+      final apiGroups = await ApiService.fetchGroups();
+      if (apiGroups.isNotEmpty) {
+        setState(() {
+          _groups = apiGroups;
+          _validateSelection(); // Safe check after API update
+        });
+
+        try {
+          final groupsJson = apiGroups.map((g) => g.toJson()).toList();
+          await box.put('groups_list', groupsJson);
+        } catch (e) {
+          debugPrint('AddPlayerScreen: failed to save groups to Hive: $e');
+        }
+      }
+    } catch (e) {
+      debugPrint('Failed to load groups from API: $e');
+    }
+
+    // 3) Load fees
+    try {
+      final raw = box.get('fee_structures', defaultValue: <dynamic, dynamic>{});
+      if (raw is Map) {
+        final map = raw.map((k, v) => MapEntry(k.toString(), (v as num).toDouble()));
+        setState(() => _fees = map);
+      }
+    } catch (e) {
+      debugPrint('AddPlayerScreen: failed to load fees: $e');
+    }
+
+    if (mounted) setState(() => _loadingGroups = false);
+  }
+
+  // Ensure _selectedGroupId is valid for the current _groups list
+  void _validateSelection() {
+    if (_groups.isEmpty) {
+      _selectedGroupId = null;
+      return;
+    }
+    // If currently null, or the current ID doesn't exist in the new list
+    if (_selectedGroupId == null || !_groups.any((g) => g.id == _selectedGroupId)) {
+      _selectedGroupId = _groups.first.id; // Default to first
     }
   }
 
@@ -55,7 +122,7 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
       lastDate: DateTime(now.year + 5),
       builder: (ctx, child) => Theme(
         data: Theme.of(ctx).copyWith(
-          colorScheme: ColorScheme.light(primary: const Color(0xFF9B6CFF)),
+          colorScheme: const ColorScheme.light(primary: Color(0xFF9B6CFF)),
         ),
         child: child ?? const SizedBox.shrink(),
       ),
@@ -73,12 +140,23 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
       lastDate: DateTime(now.year + 5),
       builder: (ctx, child) => Theme(
         data: Theme.of(ctx).copyWith(
-          colorScheme: ColorScheme.light(primary: const Color(0xFF9B6CFF)),
+          colorScheme: const ColorScheme.light(primary: Color(0xFF9B6CFF)),
         ),
         child: child ?? const SizedBox.shrink(),
       ),
     );
     if (picked != null) setState(() => _installmentDueDate = picked);
+  }
+
+  double? _selectedGroupFee() {
+    if (_selectedGroupId == null) return null;
+    // Find group safely
+    try {
+      final g = _groups.firstWhere((e) => e.id == _selectedGroupId);
+      return _fees[g.name];
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> _submit() async {
@@ -99,7 +177,7 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // 1) Create player (keeps same API signature)
+      // 1) Create player
       final createdPlayer = await ApiService.createPlayer(
         name: _nameCtl.text.trim(),
         phone: _phoneCtl.text.trim(),
@@ -112,28 +190,28 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
 
       final int playerId = createdPlayer.id;
 
-      // 2) Create installment for selected due date (same API call)
-      final due = _installmentDueDate!;
-      final int month = due.month;
-      final int year = due.year;
+      // Determine amount
+      final double? fee = _selectedGroupFee();
 
+      // 2) Create installment
+      final due = _installmentDueDate!;
       await ApiService.createInstallment(
         playerId: playerId,
-        periodMonth: month,
-        periodYear: year,
+        periodMonth: due.month,
+        periodYear: due.year,
         dueDate: due,
-        amount: null, // backend chooses based on group fee
+        amount: fee,
       );
 
-      // 3) Notify listeners (same EventBus usage)
+      // 3) Notify listeners
       EventBus().fire(PlayerEvent('added'));
       EventBus().fire(PlayerEvent('installment_created'));
 
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Player + Installment Created')));
       if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Player + Installment Created')));
       Navigator.of(context).pop(true);
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Create failed: $e')));
+      if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Create failed: $e')));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -151,11 +229,29 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Theme tokens
     const bg = Color(0xFFFBF8FF);
     const accent = Color(0xFF9B6CFF);
     const cardRadius = 16.0;
     final df = DateFormat('dd MMM yyyy');
+
+    // -----------------------------------------------------------
+    // SAFETY CHECK: Ensure the selected ID actually exists in the list
+    // This prevents the "There should be exactly one item..." crash
+    // -----------------------------------------------------------
+    int? effectiveGroupId;
+    if (_groups.isNotEmpty) {
+      if (_selectedGroupId != null && _groups.any((g) => g.id == _selectedGroupId)) {
+        effectiveGroupId = _selectedGroupId;
+      } else {
+        effectiveGroupId = _groups.first.id;
+        // We update the state variable too so the logic stays in sync
+        _selectedGroupId = effectiveGroupId;
+      }
+    } else {
+      effectiveGroupId = null;
+    }
+
+    final selectedFee = _selectedGroupFee();
 
     return Scaffold(
       backgroundColor: bg,
@@ -166,7 +262,7 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
         title: const Text('Add Player', style: TextStyle(fontWeight: FontWeight.w700)),
       ),
       body: SafeArea(
-        child: _isLoading
+        child: _isLoading || _loadingGroups
             ? const Center(child: CircularProgressIndicator())
             : SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
@@ -180,7 +276,7 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(cardRadius),
-                  boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 16, offset: const Offset(0, 10))],
+                  boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 16, offset: Offset(0, 10))],
                 ),
                 child: Row(
                   children: [
@@ -216,7 +312,7 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(cardRadius),
-                  boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 14, offset: const Offset(0, 8))],
+                  boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 14, offset: Offset(0, 8))],
                 ),
                 child: Form(
                   key: _formKey,
@@ -242,25 +338,46 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
                       ),
                       const SizedBox(height: 12),
 
-                      // Group dropdown inside rounded container
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF7F9FF),
-                          borderRadius: BorderRadius.circular(12),
+                      // Group dropdown
+                      if (_groups.isEmpty)
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(color: Colors.amber.shade50, borderRadius: BorderRadius.circular(12)),
+                          child: const Text('No groups found. Please create a group first.', style: TextStyle(color: Colors.brown)),
+                        )
+                      else
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF7F9FF),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: DropdownButtonFormField<int>(
+                            value: effectiveGroupId, // <-- Use SAFE value here
+                            decoration: const InputDecoration(border: InputBorder.none, labelText: 'Group'),
+                            items: _groups.map((g) => DropdownMenuItem<int>(
+                              value: g.id,
+                              child: Text(g.name),
+                            )).toList(),
+                            onChanged: (v) => setState(() => _selectedGroupId = v),
+                            validator: (v) => (v == null) ? 'Group is required' : null,
+                          ),
                         ),
-                        child: DropdownButtonFormField<int>(
-                          value: _selectedGroupId,
-                          decoration: const InputDecoration(border: InputBorder.none, labelText: 'Group'),
-                          items: _groups.map((g) => DropdownMenuItem<int>(value: g.id, child: Text(g.name))).toList(),
-                          onChanged: (v) => setState(() => _selectedGroupId = v),
-                          validator: (v) => (v == null) ? 'Group is required' : null,
+
+                      const SizedBox(height: 8),
+                      // show fee for selected group
+                      if (_groups.isNotEmpty && selectedFee != null)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Padding(
+                            padding: const EdgeInsets.only(left: 8.0, top: 4),
+                            child: Text('Monthly Fee: ₹${selectedFee.toStringAsFixed(0)}', style: const TextStyle(fontSize: 13, color: Colors.black87)),
+                          ),
                         ),
-                      ),
 
                       const SizedBox(height: 12),
 
-                      // Installment due date (required)
                       _pressableDateField(
                         label: 'Installment Due Date (required)',
                         text: _installmentDueDate == null ? 'Select due date' : df.format(_installmentDueDate!),
@@ -274,11 +391,10 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
                       _roundedTextField(controller: _photoCtl, label: 'Photo URL (optional)'),
                       const SizedBox(height: 20),
 
-                      // Big gradient submit button
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton(
-                          onPressed: _submit,
+                          onPressed: _groups.isEmpty ? null : _submit,
                           style: ElevatedButton.styleFrom(
                             padding: const EdgeInsets.symmetric(vertical: 14),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
