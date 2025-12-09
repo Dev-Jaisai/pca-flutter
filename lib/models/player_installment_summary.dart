@@ -1,6 +1,4 @@
 // lib/models/player_installment_summary.dart
-import 'package:flutter/foundation.dart';
-
 class PlayerInstallmentSummary {
   final int playerId;
   final String playerName;
@@ -59,5 +57,22 @@ class PlayerInstallmentSummary {
       dueDate: parseDate(json['dueDate']),
       status: json['status']?.toString() ?? 'NO_INSTALLMENT',
     );
+  }
+
+  // --- ADD THIS METHOD ---
+  Map<String, dynamic> toJson() {
+    return {
+      'playerId': playerId,
+      'playerName': playerName,
+      'phone': phone,
+      'groupName': groupName,
+      'joinDate': joinDate?.toIso8601String(),
+      'installmentId': installmentId,
+      'installmentAmount': installmentAmount,
+      'totalPaid': totalPaid,
+      'remaining': remaining,
+      'dueDate': dueDate?.toIso8601String(),
+      'status': status,
+    };
   }
 }
