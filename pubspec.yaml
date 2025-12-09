@@ -4,7 +4,7 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: ^3.0.0  # Changed from ^3.10.3 (use version constraint instead of exact)
+  sdk: ^3.0.0
 
 dependencies:
   flutter:
@@ -13,23 +13,21 @@ dependencies:
   intl: ^0.17.0
   cupertino_icons: ^1.0.8
   rename: ^3.1.0
+  url_launcher: ^6.1.0   # MUST BE inside dependencies, not dev_dependencies
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.13.1
-  url_launcher: ^6.1.0  # ADD THIS LINE
-
-
 
 flutter:
   uses-material-design: true
-
-  # Assets should be here, not in dependencies
   assets:
     - assets/images/logo.png
     - assets/images/cricket_intro.png
+    - assets/images/cricket_bg.png
+
 flutter_icons:
   android: true
   ios: true

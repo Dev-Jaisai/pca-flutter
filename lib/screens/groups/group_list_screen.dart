@@ -16,11 +16,9 @@ class _GroupListScreenState extends State<GroupListScreen> {
   @override
   void initState() {
     super.initState();
-    // assign the Future synchronously (safe)
     _futureGroups = ApiService.fetchGroups();
   }
 
-  // Use this to reload the list (assign the Future again inside setState)
   void _load() {
     setState(() {
       _futureGroups = ApiService.fetchGroups();
@@ -50,40 +48,92 @@ class _GroupListScreenState extends State<GroupListScreen> {
     if (should == true) {
       try {
         await ApiService.deleteGroup(group.id);
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Deleted ${group.name}')));
         _load();
       } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete failed: $e')));
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete failed: $e')));
       }
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    const bg = Color(0xFFFBF8FF);
+    const accent = Color(0xFF9B6CFF);
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Groups')),
+      backgroundColor: bg,
+      appBar: AppBar(
+        title: const Text('Groups'),
+        elevation: 0,
+        backgroundColor: Colors.transparent,
+        foregroundColor: Colors.black87,
+      ),
       body: FutureBuilder<List<Group>>(
         future: _futureGroups,
         builder: (context, snap) {
           if (snap.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
           if (snap.hasError) return Center(child: Text('Error: ${snap.error}'));
           final list = snap.data ?? [];
-          if (list.isEmpty) return const Center(child: Text('No groups yet. Create one.'));
-          return ListView.separated(
-            padding: const EdgeInsets.all(8),
-            itemCount: list.length,
-            separatorBuilder: (_, __) => const Divider(height: 1),
-            itemBuilder: (context, i) {
-              final g = list[i];
-              return ListTile(
-                leading: CircleAvatar(child: Text(g.name.isNotEmpty ? g.name[0].toUpperCase() : '?')),
-                title: Text(g.name),
-                trailing: IconButton(
-                  icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                  onPressed: () => _confirmDelete(g),
-                ),
-              );
+          if (list.isEmpty)
+            return Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: const [
+                  Icon(Icons.group_work_outlined, size: 56, color: Colors.black26),
+                  SizedBox(height: 12),
+                  Text('No groups yet. Create one.', style: TextStyle(color: Colors.black54)),
+                ],
+              ),
+            );
+
+          return RefreshIndicator(
+            onRefresh: () async {
+              _load();
+              await _futureGroups;
             },
+            color: accent,
+            child: ListView.separated(
+              padding: const EdgeInsets.all(12),
+              itemCount: list.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              itemBuilder: (context, i) {
+                final g = list[i];
+                return Material(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  elevation: 6,
+                  shadowColor: Colors.black12,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () {
+                      // optionally open a group-detail or filter players by group in future
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                      child: Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 22,
+                            backgroundColor: const Color(0xFFF3F5FF),
+                            child: Text(g.name.isNotEmpty ? g.name[0].toUpperCase() : '?', style: const TextStyle(fontWeight: FontWeight.w700)),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(g.name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                            onPressed: () => _confirmDelete(g),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
           );
         },
       ),
@@ -91,6 +141,7 @@ class _GroupListScreenState extends State<GroupListScreen> {
         onPressed: _openCreate,
         icon: const Icon(Icons.add),
         label: const Text('Add Group'),
+        backgroundColor: accent,
       ),
     );
   }
