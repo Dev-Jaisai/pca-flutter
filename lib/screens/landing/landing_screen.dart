@@ -233,20 +233,21 @@ class _LandingScreenState extends State<LandingScreen> {
                       children: [
                         _card(
                           context,
-                          icon: Icons.people,
-                          title: 'Manage Player',
-                          subtitle: 'View all players, add or delete players',
-                          onTap: () => _open(context, '/players'),
-                          color: Colors.teal,
-                        ),
-                        _card(
-                          context,
                           icon: Icons.list_alt,
                           title: 'All Installments',
                           subtitle: 'View all players with their installments (not month-filtered)',
                           onTap: () => Navigator.pushNamed(context, '/all-installments'),
                           color: Colors.blue,
                         ),
+                        _card(
+                          context,
+                          icon: Icons.people,
+                          title: 'Manage Player',
+                          subtitle: 'View all players, add or delete players',
+                          onTap: () => _open(context, '/players'),
+                          color: Colors.teal,
+                        ),
+
                         _card(
                           context,
                           icon: Icons.group_add,

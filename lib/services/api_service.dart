@@ -1,6 +1,7 @@
 // lib/services/api_service.dart
 import 'dart:convert';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../models/InstallmentSummary.dart';
 import '../models/fee_structure.dart';
@@ -338,23 +339,35 @@ class ApiService {
           'Failed to create installment: ${response.statusCode} - ${response.body}');
     }
   }
-
-  static Future<List<PlayerInstallmentSummary>> fetchAllInstallmentsSummary() async {
-    // UPDATE: Now points to the correct endpoint in InstallmentController
-    final url = Uri.parse('$baseUrl/api/installments/all-summary');
+  // --- OPTIMIZED FETCH ---
+  static Future<List<PlayerInstallmentSummary>> fetchAllInstallmentsSummary({int page = 0, int size = 2000}) async {
+    final url = Uri.parse('$baseUrl/api/installments/all-summary?page=$page&size=$size');
     final response = await http.get(url);
+
     if (response.statusCode == 200) {
-      final List<dynamic> data = json.decode(response.body);
-      return data
-          .map((e) =>
-          PlayerInstallmentSummary.fromJson(e as Map<String, dynamic>))
-          .toList();
+      // Pass the raw string to background thread
+      return compute(_parseInstallmentsResponse, response.body);
     } else {
-      throw Exception(
-          'Failed to load all installments: ${response.statusCode} - ${response.body}');
+      throw Exception('Failed to load installments: ${response.statusCode}');
     }
   }
+  // Standalone parser
+  static List<PlayerInstallmentSummary> _parseInstallmentsResponse(String responseBody) {
+    final dynamic decoded = json.decode(responseBody);
+    List<dynamic> data;
 
+    if (decoded is Map<String, dynamic> && decoded.containsKey('content')) {
+      data = decoded['content'];
+    } else if (decoded is List) {
+      data = decoded;
+    } else {
+      data = [];
+    }
+
+    return data
+        .map((e) => PlayerInstallmentSummary.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
   // ApiService: add method
   static Future<Map<String, dynamic>> fetchLatestInstallmentMonth() async {
     final url = Uri.parse('$baseUrl/api/installments/latest-month');
@@ -387,6 +400,26 @@ class ApiService {
       return allFees;
     } catch (e) {
       throw Exception('Failed to load fees: $e');
+    }
+  }
+  static Future<void> extendInstallmentDate({
+    required int installmentId,
+    required DateTime newDate,
+  }) async {
+    final url = Uri.parse('$baseUrl/api/installments/extend-due-date');
+    final body = {
+      'installmentId': installmentId,
+      'newDueDate': newDate.toIso8601String().split('T')[0], // "2025-12-25"
+    };
+
+    final response = await http.post(
+      url,
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode(body),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to extend date: ${response.body}');
     }
   }
 }

@@ -1,8 +1,9 @@
-// lib/widgets/dashboard_stats.dart
 import 'dart:async';
+import 'package:flutter/foundation.dart'; // For compute
 import 'package:flutter/material.dart';
 import '../models/player_installment_summary.dart';
 import '../services/api_service.dart';
+import '../services/data_manager.dart';
 import '../utils/event_bus.dart';
 
 class DashboardStats extends StatefulWidget {
@@ -15,37 +16,30 @@ class DashboardStats extends StatefulWidget {
 class DashboardStatsState extends State<DashboardStats> with TickerProviderStateMixin {
   int _totalPlayers = 0;
   int _currentMonthDue = 0;
-  int _pendingPayments = 0;
+  int _upcomingCount = 0; // Renamed from pending
   int _overdue = 0;
   bool _loading = true;
   late StreamSubscription<PlayerEvent> _playerEventsSubscription;
 
-  // For staggered card reveals
   final List<bool> _visible = [false, false, false, false];
-
-  // For smooth number animations
   late AnimationController _numAnimController;
   late Animation<double> _numAnim;
 
   @override
   void initState() {
     super.initState();
-
     _numAnimController = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 800));
     _numAnim = CurvedAnimation(parent: _numAnimController, curve: Curves.easeOut);
 
+    _loadFromCache();
     _loadStats();
 
-    // Listen for global events to auto-refresh stats
     _playerEventsSubscription = EventBus().stream.listen((event) {
       if ([
-        'added',
-        'deleted',
-        'updated',
-        'installment_created',
-        'installment_deleted',
-        'payment_recorded'
+        'added', 'deleted', 'updated',
+        'installment_created', 'installment_deleted', 'payment_recorded',
+        'installment_updated'
       ].contains(event.action)) {
         _loadStats();
       }
@@ -59,101 +53,101 @@ class DashboardStatsState extends State<DashboardStats> with TickerProviderState
     super.dispose();
   }
 
-  String _normalizeStatus(String? s) {
-    if (s == null) return '';
-    return s.toLowerCase().replaceAll('_', ' ').trim();
+  Future<void> _loadFromCache() async {
+    final cachedInstallments = await DataManager().getCachedAllInstallments();
+    final cachedPlayers = DataManager().getCachedData().players;
+
+    if (cachedInstallments != null && cachedInstallments.isNotEmpty) {
+      final stats = await compute(_calculateStats, cachedInstallments);
+      if (mounted) {
+        setState(() {
+          _totalPlayers = cachedPlayers?.length ?? 0;
+          _currentMonthDue = stats['due']!;
+          _upcomingCount = stats['upcoming']!;
+          _overdue = stats['overdue']!;
+          _loading = false;
+        });
+        _animateValues();
+      }
+    }
   }
 
   Future<void> _loadStats() async {
-    if (mounted) setState(() => _loading = true);
-
     try {
-      // 1. Fetch ALL data (Past, Present, Future)
-      // This is critical to catch overdue items from previous months (e.g., November).
-      List<PlayerInstallmentSummary> allRows = [];
-      try {
-        allRows = await ApiService.fetchAllInstallmentsSummary();
-      } catch (e) {
-        debugPrint('Failed to fetch all summaries: $e');
-        allRows = [];
-      }
+      final results = await Future.wait([
+        ApiService.fetchAllInstallmentsSummary(),
+        ApiService.fetchPlayers(),
+      ]);
 
-      // 2. Fetch total players count
-      List<dynamic> playersRaw = [];
-      try {
-        playersRaw = await ApiService.fetchPlayers();
-      } catch (e) {
-        playersRaw = [];
-      }
+      final allRows = results[0] as List<PlayerInstallmentSummary>;
+      final players = results[1] as List<dynamic>;
 
-      final now = DateTime.now();
-
-      // We categorize items by checking their dates against 'now'
-      int dueThisMonthCount = 0;
-      int pendingThisMonthCount = 0;
-      int overdueCount = 0;
-
-      // Group rows by player if needed, or iterate directly.
-      // We will iterate directly to count every single pending/overdue installment.
-
-      final Map<int, List<PlayerInstallmentSummary>> rowsByPlayer = {};
-      for (final r in allRows) {
-        if (r.playerId == null) continue;
-        rowsByPlayer.putIfAbsent(r.playerId, () => []).add(r);
-      }
-
-      rowsByPlayer.forEach((playerId, rows) {
-        bool isPlayerOverdue = false;
-        bool isPlayerDueThisMonth = false;
-        bool isPlayerPendingThisMonth = false;
-
-        for (final r in rows) {
-          final st = _normalizeStatus(r.status);
-          final bool isPaid = st == 'paid';
-          final bool isPending = st == 'pending';
-          final bool isPartial = st == 'partially paid' || st == 'partially_paid';
-
-          if (r.dueDate == null) continue;
-
-          // Check for Overdue (Any unpaid bill strictly before today)
-          // We use start of today to ensure bills due TODAY are not "Overdue" yet.
-          final startOfToday = DateTime(now.year, now.month, now.day);
-
-          if (!isPaid && r.dueDate!.isBefore(startOfToday)) {
-            isPlayerOverdue = true;
-          }
-
-          // Check for "This Month" Stats
-          if (r.dueDate!.year == now.year && r.dueDate!.month == now.month) {
-            if (isPending || isPartial) isPlayerDueThisMonth = true;
-            if (isPending) isPlayerPendingThisMonth = true;
-          }
-        }
-
-        // Increment global counters based on player status
-        if (isPlayerOverdue) overdueCount++;
-        if (isPlayerDueThisMonth) dueThisMonthCount++;
-        if (isPlayerPendingThisMonth) pendingThisMonthCount++;
-      });
+      await DataManager().saveAllInstallments(allRows);
+      final stats = await compute(_calculateStats, allRows);
 
       if (mounted) {
-        _numAnimController.reset();
-        _numAnimController.forward();
-
         setState(() {
-          _totalPlayers = playersRaw.length;
-          _currentMonthDue = dueThisMonthCount;
-          _pendingPayments = pendingThisMonthCount;
-          _overdue = overdueCount; // This will now correctly show past month overdues
+          _totalPlayers = players.length;
+          _currentMonthDue = stats['due']!;
+          _upcomingCount = stats['upcoming']!;
+          _overdue = stats['overdue']!;
+          _loading = false;
         });
-
-        _playStaggered();
+        _animateValues();
       }
     } catch (e) {
       debugPrint('Error loading stats: $e');
-    } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && _totalPlayers == 0) setState(() => _loading = false);
     }
+  }
+
+  void _animateValues() {
+    _numAnimController.reset();
+    _numAnimController.forward();
+    _playStaggered();
+  }
+
+  // --- UPDATED LOGIC FOR UPCOMING ---
+  static Map<String, int> _calculateStats(List<PlayerInstallmentSummary> rows) {
+    int dueThisMonthCount = 0;
+    int upcomingCount = 0;
+    int overdueCount = 0;
+
+    final now = DateTime.now();
+    final startOfToday = DateTime(now.year, now.month, now.day);
+
+    // Determine Next Month
+    final nextMonthDate = DateTime(now.year, now.month + 1, 1);
+    final nextMonth = nextMonthDate.month;
+    final nextYear = nextMonthDate.year;
+
+    for (final r in rows) {
+      final st = (r.status ?? '').toUpperCase().replaceAll('_', ' ').trim();
+      final bool isPaid = st == 'PAID';
+
+      if (r.dueDate == null) continue;
+
+      // 1. OVERDUE: Date passed AND not paid
+      if (!isPaid && r.dueDate!.isBefore(startOfToday)) {
+        overdueCount++;
+      }
+
+      // 2. THIS MONTH DUE: Current Month AND not paid
+      if (r.dueDate!.year == now.year && r.dueDate!.month == now.month) {
+        if (!isPaid) dueThisMonthCount++;
+      }
+
+      // 3. UPCOMING (Next Month): Next Month AND not paid
+      if (r.dueDate!.year == nextYear && r.dueDate!.month == nextMonth) {
+        if (!isPaid) upcomingCount++;
+      }
+    }
+
+    return {
+      'due': dueThisMonthCount,
+      'upcoming': upcomingCount,
+      'overdue': overdueCount,
+    };
   }
 
   void _playStaggered() {
@@ -197,10 +191,7 @@ class DashboardStatsState extends State<DashboardStats> with TickerProviderState
                 end: Alignment.bottomRight),
             borderRadius: BorderRadius.circular(16),
             boxShadow: const [
-              BoxShadow(
-                  color: Color(0x22000000),
-                  blurRadius: 10,
-                  offset: Offset(0, 6)),
+              BoxShadow(color: Color(0x22000000), blurRadius: 10, offset: Offset(0, 6)),
             ],
           ),
           child: Material(
@@ -219,10 +210,7 @@ class DashboardStatsState extends State<DashboardStats> with TickerProviderState
                         color: Colors.white24,
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: const [
-                          BoxShadow(
-                              color: Color(0x11000000),
-                              blurRadius: 6,
-                              offset: Offset(0, 4))
+                          BoxShadow(color: Color(0x11000000), blurRadius: 6, offset: Offset(0, 4))
                         ],
                       ),
                       child: Icon(icon, size: 26, color: accent),
@@ -237,31 +225,18 @@ class DashboardStatsState extends State<DashboardStats> with TickerProviderState
                           FittedBox(
                             fit: BoxFit.scaleDown,
                             alignment: Alignment.centerLeft,
-                            child: _animatedNumber(
-                                value,
-                                const TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white)),
+                            child: _animatedNumber(value, const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
                           ),
                           const SizedBox(height: 2),
-                          Text(title,
-                              style: const TextStyle(
-                                  fontSize: 11, color: Colors.white70),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis),
+                          Text(title, style: const TextStyle(fontSize: 11, color: Colors.white70), maxLines: 1, overflow: TextOverflow.ellipsis),
                         ],
                       ),
                     ),
                     Container(
                       width: 28,
                       height: 28,
-                      decoration: BoxDecoration(
-                        color: Colors.white24,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Icon(Icons.chevron_right,
-                          size: 20, color: Colors.white70),
+                      decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(8)),
+                      child: const Icon(Icons.chevron_right, size: 20, color: Colors.white70),
                     ),
                   ],
                 ),
@@ -279,10 +254,6 @@ class DashboardStatsState extends State<DashboardStats> with TickerProviderState
       return const SizedBox(height: 160, child: Center(child: CircularProgressIndicator()));
     }
 
-    // Helper to get current month string "YYYY-MM"
-    final now = DateTime.now();
-    final currentMonth = '${now.year}-${now.month.toString().padLeft(2, '0')}';
-
     final configs = [
       {
         'title': 'Total Players',
@@ -290,7 +261,6 @@ class DashboardStatsState extends State<DashboardStats> with TickerProviderState
         'icon': Icons.people,
         'gradient': [Colors.blue.shade400, Colors.blue.shade200],
         'accent': Colors.blue.shade50,
-        // Go to All Installments (flat list of everyone)
         'onTap': () => Navigator.pushNamed(context, '/all-installments'),
       },
       {
@@ -299,33 +269,24 @@ class DashboardStatsState extends State<DashboardStats> with TickerProviderState
         'icon': Icons.calendar_month,
         'gradient': [Colors.orange.shade400, Colors.orange.shade200],
         'accent': Colors.orange.shade50,
-        // Go to Summary -> Filter: 'due'
-        'onTap': _currentMonthDue > 0
-            ? () => Navigator.pushNamed(
+        'onTap': () => Navigator.pushNamed(
             context,
-            '/installment-summary',
-            arguments: {
-              'month': currentMonth,
-              'filter': 'due'
-            }
-        )
-            : null,
+            '/all-installments',
+            arguments: {'filter': 'Due (Month)'}
+        ),
       },
+      // --- UPCOMING (Next Month) ---
       {
-        'title': 'Pending',
-        'value': _pendingPayments,
-        'icon': Icons.pending,
-        'gradient': [Colors.red.shade400, Colors.red.shade200],
-        'accent': Colors.red.shade50,
-        // Go to Summary -> Filter: 'pending'
-        'onTap': _pendingPayments > 0
+        'title': 'Upcoming',
+        'value': _upcomingCount,
+        'icon': Icons.next_plan, // New Icon
+        'gradient': [Colors.teal.shade400, Colors.teal.shade200], // New Color
+        'accent': Colors.teal.shade50,
+        'onTap': _upcomingCount > 0
             ? () => Navigator.pushNamed(
             context,
-            '/installment-summary',
-            arguments: {
-              'month': currentMonth,
-              'filter': 'pending'
-            }
+            '/all-installments',
+            arguments: {'filter': 'Upcoming'} // New Filter
         )
             : null,
       },
@@ -335,15 +296,11 @@ class DashboardStatsState extends State<DashboardStats> with TickerProviderState
         'icon': Icons.warning,
         'gradient': [Colors.purple.shade400, Colors.purple.shade200],
         'accent': Colors.purple.shade50,
-        // Go to Summary -> Filter: 'overdue' (Screen handles ignoring month)
         'onTap': _overdue > 0
             ? () => Navigator.pushNamed(
             context,
-            '/installment-summary',
-            arguments: {
-              'month': currentMonth, // Passed but ignored by 'overdue' logic
-              'filter': 'overdue'
-            }
+            '/all-installments',
+            arguments: {'filter': 'Overdue'}
         )
             : null,
       },

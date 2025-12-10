@@ -113,35 +113,21 @@ class DataManager {
     _memAllInstallments = null;
     await _box.clear();
   }
-
-  // -----------------------------
-  // NEW METHODS FOR ALL INSTALLMENTS
-  // -----------------------------
-
-  /// Returns cached All Installments if available (RAM -> Hive)
-  List<PlayerInstallmentSummary>? getCachedAllInstallments() {
-    // 1. Try RAM
+  Future<List<PlayerInstallmentSummary>?> getCachedAllInstallments() async {
+    // 1. Try RAM (Instant)
     if (_memAllInstallments != null && _memAllInstallments!.isNotEmpty) {
       return _memAllInstallments;
     }
 
-    // 2. Try Disk (Hive)
+    // 2. Try Disk (Hive) with Background Decoding
     try {
       if (_box.containsKey('all_installments_cache')) {
         final jsonStr = _box.get('all_installments_cache') as String;
-        final List<dynamic> list = jsonDecode(jsonStr) as List<dynamic>;
-        final items = list.map((e) {
-          // ensure Map<String, dynamic>
-          if (e is Map<String, dynamic>) {
-            return PlayerInstallmentSummary.fromJson(e);
-          } else if (e is Map) {
-            return PlayerInstallmentSummary.fromJson(Map<String, dynamic>.from(e));
-          } else {
-            throw Exception('Invalid cached installment item');
-          }
-        }).toList();
 
-        _memAllInstallments = items; // Update RAM
+        // HEAVY LIFTING: Run JSON decoding in a separate thread
+        final items = await compute(_parseCachedInstallments, jsonStr);
+
+        _memAllInstallments = items;
         return items;
       }
     } catch (e) {
@@ -151,15 +137,31 @@ class DataManager {
     return null;
   }
 
-  /// Save all-installments to RAM + Hive (stores JSON strings)
+  // Standalone function for compute (must be static or outside class)
+  static List<PlayerInstallmentSummary> _parseCachedInstallments(String jsonStr) {
+    final List<dynamic> list = jsonDecode(jsonStr) as List<dynamic>;
+    return list.map((e) {
+      if (e is Map<String, dynamic>) {
+        return PlayerInstallmentSummary.fromJson(e);
+      } else if (e is Map) {
+        return PlayerInstallmentSummary.fromJson(Map<String, dynamic>.from(e));
+      }
+      throw Exception('Invalid item in cache');
+    }).toList();
+  }
+
   Future<void> saveAllInstallments(List<PlayerInstallmentSummary> items) async {
-    _memAllInstallments = items; // Update RAM
+    _memAllInstallments = items;
     try {
-      // Encode to JSON string
-      final jsonStr = jsonEncode(items.map((e) => e.toJson()).toList());
+      // Also optimize saving if possible, but reading is the priority for load time
+      final jsonStr = await compute(_encodeInstallments, items);
       await _box.put('all_installments_cache', jsonStr);
     } catch (e) {
       debugPrint('DataManager.saveAllInstallments error: $e');
     }
+  }
+
+  static String _encodeInstallments(List<PlayerInstallmentSummary> items) {
+    return jsonEncode(items.map((e) => e.toJson()).toList());
   }
 }
