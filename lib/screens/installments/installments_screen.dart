@@ -98,6 +98,13 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
                 final statusText = it.status ?? 'N/A';
                 final period = '${it.periodMonth ?? '-'} / ${it.periodYear ?? '-'}';
 
+                // Status Colors
+                Color statusColor = Colors.grey;
+                if(statusText == 'OVERDUE') statusColor = Colors.red;
+                else if(statusText == 'PENDING') statusColor = Colors.blue;
+                else if(statusText == 'PARTIALLY_PAID') statusColor = Colors.orange;
+                else if(statusText == 'PAID') statusColor = Colors.green;
+
                 return Material(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(14),
@@ -108,28 +115,31 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // header row: period, status, paid badge
+                        // Header Row: Period, Status
                         Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Expanded(
+                            Text(
+                              period,
+                              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+                            ),
+                            // Status Badge
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: statusColor.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: statusColor.withOpacity(0.5)),
+                              ),
                               child: Text(
-                                '$period  •  $statusText',
-                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                                statusText.replaceAll('_', ' '),
+                                style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 11),
                               ),
                             ),
-                            if (isPaid)
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                decoration: BoxDecoration(
-                                  color: Colors.green.shade50,
-                                  borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(color: Colors.green.shade200),
-                                ),
-                                child: const Text('PAID', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
-                              ),
                           ],
                         ),
-                        const SizedBox(height: 10),
+
+                        const Divider(height: 20),
 
                         // amounts and due date
                         Row(
@@ -148,14 +158,20 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
                               Column(
                                 crossAxisAlignment: CrossAxisAlignment.end,
                                 children: [
-                                  const Text('Due', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                                  const Text('Due Date', style: TextStyle(fontSize: 12, color: Colors.black54)),
                                   const SizedBox(height: 4),
-                                  Text(df.format(it.dueDate!), style: const TextStyle(fontWeight: FontWeight.w600)),
+                                  Text(
+                                      df.format(it.dueDate!),
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          color: (statusText == 'OVERDUE' && !isPaid) ? Colors.red : Colors.black87
+                                      )
+                                  ),
                                 ],
                               ),
                           ],
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 16),
 
                         // action row
                         Row(

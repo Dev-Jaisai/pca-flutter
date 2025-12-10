@@ -43,11 +43,9 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
     try {
       List<PlayerInstallmentSummary> list;
 
-      // ---------------------------------------------------------
-      // FIX IS HERE:
-      // If we want OVERDUE, we must ignore the month and fetch ALL data.
-      // Otherwise, we fetch the specific month.
-      // ---------------------------------------------------------
+      // If viewing "Overdue", we usually want GLOBAL overdue (past months).
+      // But if the user deliberately picks a month while in "All" or "Due" mode,
+      // we fetch that specific month's data.
       if (_filter == 'overdue') {
         list = await ApiService.fetchAllInstallmentsSummary();
       } else {
@@ -79,19 +77,19 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
         }).toList();
 
       case 'due':
+      // Shows Pending OR Partial for the selected month
         return list.where((p) {
           final s = _normStatus(p.status);
           return s == 'PENDING' || s == 'PARTIALLY PAID';
         }).toList();
 
       case 'overdue':
-      // Checks strictly before TODAY (ignoring time)
+      // Logic for Global Overdue
         final startOfToday = DateTime(now.year, now.month, now.day);
         return list.where((p) {
           final s = _normStatus(p.status);
           final isPaid = s == 'PAID';
           final dueDate = p.dueDate;
-          // Return items that are NOT Paid AND due date is before today
           return !isPaid && dueDate != null && dueDate.isBefore(startOfToday);
         }).toList();
 
@@ -101,27 +99,101 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
     }
   }
 
+  // --- RESTORED: Month Picker Logic ---
+  // ... inside _InstallmentSummaryScreenState class ...
+
+  // NEW: Custom Month/Year Picker using Dropdowns
   Future<void> _pickMonth() async {
     final now = DateTime.now();
-    final initial = DateTime(int.parse(_selectedMonth.split('-')[0]), int.parse(_selectedMonth.split('-')[1]));
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: initial,
-      firstDate: DateTime(now.year - 5),
-      lastDate: DateTime(now.year + 5),
-      helpText: 'Select month',
-      fieldLabelText: 'Month',
-      initialEntryMode: DatePickerEntryMode.calendar,
-    );
+    // Parse current selection to set initial values in dropdowns
+    final parts = _selectedMonth.split('-');
+    int currentYear = int.parse(parts[0]);
+    int currentMonth = int.parse(parts[1]);
 
-    if (picked != null) {
-      final newMonth = '${picked.year.toString().padLeft(4, '0')}-${picked.month.toString().padLeft(2, '0')}';
-      setState(() => _selectedMonth = newMonth);
-      // If user picks a month, we should probably switch back to 'all' or 'due' mode
-      // if they were in 'overdue' mode, but for now we just reload:
-      await _load();
-    }
+    await showDialog(
+      context: context,
+      builder: (context) {
+        // Local state variables for the dialog
+        int tempYear = currentYear;
+        int tempMonth = currentMonth;
+
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text("Select Month"),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Year Dropdown
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text("Year:", style: TextStyle(fontWeight: FontWeight.bold)),
+                      DropdownButton<int>(
+                        value: tempYear,
+                        // Generate years from (Current - 5) to (Current + 5)
+                        items: List.generate(11, (index) {
+                          final y = now.year - 5 + index;
+                          return DropdownMenuItem(value: y, child: Text(y.toString()));
+                        }).toList(),
+                        onChanged: (val) {
+                          if (val != null) setDialogState(() => tempYear = val);
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  // Month Dropdown
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text("Month:", style: TextStyle(fontWeight: FontWeight.bold)),
+                      DropdownButton<int>(
+                        value: tempMonth,
+                        items: List.generate(12, (index) {
+                          final m = index + 1;
+                          // Format month name (e.g., "January", "February")
+                          final name = DateFormat.MMMM().format(DateTime(2024, m));
+                          return DropdownMenuItem(value: m, child: Text(name));
+                        }).toList(),
+                        onChanged: (val) {
+                          if (val != null) setDialogState(() => tempMonth = val);
+                        },
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("Cancel"),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    // Logic: "Internally select data for that month"
+                    // We construct "YYYY-MM" which the API uses to fetch the whole month's data
+                    final newMonthStr = '$tempYear-${tempMonth.toString().padLeft(2, '0')}';
+
+                    setState(() {
+                      _selectedMonth = newMonthStr;
+                    });
+
+                    // Refresh data for the new selected month
+                    _load();
+                    Navigator.pop(context);
+                  },
+                  child: const Text("OK"),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
+
+  // ... rest of the code remains the same ...
 
   void _openPayments(PlayerInstallmentSummary row) {
     if (row.installmentId != null) {
@@ -214,15 +286,87 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
         case 'PARTIALLY_PAID':
         case 'PARTIALLY PAID': return Colors.orange;
         case 'PENDING': return Colors.blueGrey;
-        case 'OVERDUE': return Colors.red; // Added specific Overdue color if API sends it
+        case 'OVERDUE': return Colors.red;
         default: return Colors.redAccent;
       }
     }
 
-    // Dynamic coloring for Overdue status (calculated on client side)
     final isOverdue = p.dueDate != null && p.dueDate!.isBefore(DateTime.now()) && _normStatus(p.status) != 'PAID';
     final displayStatus = isOverdue && _filter == 'overdue' ? 'OVERDUE' : p.status;
     final displayColor = isOverdue && _filter == 'overdue' ? Colors.red : statusColor(p.status);
+
+    final leftColumn = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          p.playerName,
+          style: const TextStyle(fontWeight: FontWeight.w600),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        const SizedBox(height: 6),
+        Text(
+          '${p.groupName ?? ''} • ${p.phone ?? ''}'.trim(),
+          style: TextStyle(color: Colors.grey[700], fontSize: 13),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Flexible(
+              child: Text('Due: ${p.dueDate != null ? df.format(p.dueDate!) : '—'}',
+                  style: TextStyle(color: Colors.grey[700], fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
+            ),
+            const SizedBox(width: 8),
+            Chip(
+              label: Text(displayStatus, style: const TextStyle(fontSize: 12, color: Colors.white)),
+              backgroundColor: displayColor,
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
+            ),
+          ],
+        ),
+      ],
+    );
+
+    final rightColumn = Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // FITTED BOX FIX: Prevents overflow
+        Flexible(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerRight,
+            child: Text(
+              'Total: ${moneyStr(p.installmentAmount)}',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Flexible(
+          child: Text(
+            'Paid: ${moneyStr(p.totalPaid)}',
+            style: TextStyle(color: Colors.grey[800], fontSize: 12),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.right,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Flexible(
+          child: Text(
+            'Left: ${p.remaining == null ? '—' : '₹ ${p.remaining!.toStringAsFixed(0)}'}',
+            style: TextStyle(color: Colors.grey[800], fontSize: 12),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.right,
+          ),
+        ),
+      ],
+    );
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
@@ -240,46 +384,11 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
               ),
             ),
             const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(p.playerName, style: const TextStyle(fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
-                  const SizedBox(height: 6),
-                  Text('${p.groupName ?? ''} • ${p.phone ?? ''}'.trim(), style: TextStyle(color: Colors.grey[700], fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text('Due: ${p.dueDate != null ? df.format(p.dueDate!) : '—'}',
-                            style: TextStyle(color: Colors.grey[700], fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
-                      ),
-                      const SizedBox(width: 8),
-                      Chip(
-                        label: Text(displayStatus, style: const TextStyle(fontSize: 12, color: Colors.white)),
-                        backgroundColor: displayColor,
-                        visualDensity: VisualDensity.compact,
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
+            Expanded(child: leftColumn),
             const SizedBox(width: 8),
             ConstrainedBox(
-              constraints: const BoxConstraints(minWidth: 80, maxWidth: 140),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Flexible(child: Text(moneyStr(p.installmentAmount), style: const TextStyle(fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.right)),
-                  const SizedBox(height: 6),
-                  Flexible(child: Text('Paid: ${moneyStr(p.totalPaid)}', style: TextStyle(color: Colors.grey[800]), maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.right)),
-                  const SizedBox(height: 4),
-                  Flexible(child: Text('Left: ${p.remaining == null ? '—' : '₹ ${p.remaining!.toStringAsFixed(0)}'}', style: TextStyle(color: Colors.grey[800]), maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.right)),
-                ],
-              ),
+              constraints: const BoxConstraints(minWidth: 70, maxWidth: 140),
+              child: rightColumn,
             ),
             const SizedBox(width: 8),
             Column(
@@ -298,6 +407,7 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Dynamic Title Logic based on Selected Month
     final yearMonthLabel = () {
       final parts = _selectedMonth.split('-');
       final y = int.tryParse(parts[0]) ?? DateTime.now().year;
@@ -305,21 +415,25 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
       return DateFormat.yMMMM().format(DateTime(y, m));
     }();
 
-    final filterLabel = {
-      'all': '',
-      'pending': ' — Pending',
-      'due': ' — Due',
-      'overdue': ' — All Overdue',
-    }[_filter] ?? '';
+    String titleText;
+    if (_filter == 'overdue') {
+      titleText = 'Overdue Payments';
+    } else if (_filter == 'due') {
+      titleText = '$yearMonthLabel Dues';
+    } else if (_filter == 'pending') {
+      titleText = '$yearMonthLabel Pending';
+    } else {
+      titleText = 'Installments — $yearMonthLabel';
+    }
 
-    // Hide calendar if we are looking at All Overdue items
+    // Only show calendar if NOT in "Global Overdue" mode
     final bool showCalendar = _filter != 'overdue';
 
     return Scaffold(
       appBar: AppBar(
-        // If overdue, show generic title, otherwise show Month
-        title: Text(_filter == 'overdue' ? 'Overdue Payments' : 'Installments — $yearMonthLabel$filterLabel'),
+        title: Text(titleText),
         actions: [
+          // --- RESTORED: Calendar Icon ---
           if (showCalendar)
             IconButton(icon: const Icon(Icons.calendar_today), onPressed: _pickMonth),
           IconButton(icon: const Icon(Icons.refresh), onPressed: _load),

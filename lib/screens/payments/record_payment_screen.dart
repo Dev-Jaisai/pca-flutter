@@ -1,8 +1,7 @@
 // lib/screens/payments/record_payment_screen.dart
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import '../../services/api_service.dart';
-import '../../utils/event_bus.dart'; // ADDED import for EventBus and PlayerEvent
+import '../../utils/event_bus.dart';
 
 class RecordPaymentScreen extends StatefulWidget {
   final int installmentId;
@@ -45,21 +44,25 @@ class _RecordPaymentScreenState extends State<RecordPaymentScreen> {
         reference: ref,
       );
 
-      // FIRE EVENT so dashboard and lists refresh
+      // Fire events to update other screens (Dashboard stats etc)
       EventBus().fire(PlayerEvent('payment_recorded'));
       EventBus().fire(PlayerEvent('installment_updated'));
 
-      // Notify caller and close
       if (!mounted) return;
-      Navigator.of(context).pop(true);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Payment recorded successfully')));
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Payment recorded')));
-      }
+      // --- THE FIX: JUMP BACK TO ALL INSTALLMENTS ---
+      // This pops all screens until it finds '/all-installments' OR the very first screen.
+      // This effectively closes "Record Payment" AND "Payment List" in one go.
+      Navigator.of(context).popUntil((route) {
+        return route.settings.name == '/all-installments' || route.isFirst;
+      });
+
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Record failed: $e')));
-    } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Record failed: $e')));
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -73,8 +76,8 @@ class _RecordPaymentScreenState extends State<RecordPaymentScreen> {
       backgroundColor: bg,
       appBar: AppBar(
         title: const Text('Record Payment'),
-        elevation: 0,
         backgroundColor: Colors.transparent,
+        elevation: 0,
         foregroundColor: Colors.black87,
       ),
       body: Padding(
@@ -85,7 +88,6 @@ class _RecordPaymentScreenState extends State<RecordPaymentScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // small intro card
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -105,8 +107,6 @@ class _RecordPaymentScreenState extends State<RecordPaymentScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-
-              // form card
               Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
@@ -144,13 +144,13 @@ class _RecordPaymentScreenState extends State<RecordPaymentScreen> {
                         width: double.infinity,
                         child: ElevatedButton(
                           onPressed: _submit,
-                          style: ButtonStyle(
-                            backgroundColor: MaterialStateProperty.all(accent),
-                            padding: MaterialStateProperty.all(const EdgeInsets.symmetric(vertical: 14)),
-                            shape: MaterialStateProperty.all(RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                            elevation: MaterialStateProperty.all(8),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: accent,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            elevation: 8,
                           ),
-                          child: const Text('Record Payment', style: TextStyle(fontWeight: FontWeight.w700)),
+                          child: const Text('Record Payment', style: TextStyle(fontWeight: FontWeight.w700, color: Colors.white)),
                         ),
                       )
                     ],

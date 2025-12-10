@@ -92,6 +92,14 @@ class LandingScreen extends StatelessWidget {
                   scrollDirection: Axis.horizontal,
                   children: [
                     _featureCard(
+                      title: 'All Installments',
+                      subtitle: 'Month-wise installments (not filtered)',
+                      icon: Icons.calendar_month,
+                      onTap: () {
+                        Navigator.pushNamed(context, '/installments');
+                      },
+                    ),
+                    _featureCard(
                       title: 'Players',
                       subtitle: 'View all players, add or delete players',
                       icon: Icons.group,
@@ -100,14 +108,7 @@ class LandingScreen extends StatelessWidget {
                         Navigator.pushNamed(context, '/players');
                       },
                     ),
-                    _featureCard(
-                      title: 'All Installments',
-                      subtitle: 'Month-wise installments (not filtered)',
-                      icon: Icons.calendar_month,
-                      onTap: () {
-                        Navigator.pushNamed(context, '/installments');
-                      },
-                    ),
+
                     _featureCard(
                       title: 'Groups',
                       subtitle: 'Create & manage player groups',
@@ -120,6 +121,15 @@ class LandingScreen extends StatelessWidget {
                 ),
               ),
 
+              const SizedBox(height: 12),
+              _sectionTile(
+                context,
+                icon: Icons.receipt_long,
+                title: 'All Installments',
+                subtitle: 'View players with their installments',
+                onTap: () => Navigator.pushNamed(context, '/installments'),
+              ),
+
               const SizedBox(height: 18),
 
               // Quick list tiles (navigation)
@@ -129,14 +139,6 @@ class LandingScreen extends StatelessWidget {
                 title: 'Players',
                 subtitle: 'View all players, add or delete players',
                 onTap: () => Navigator.pushNamed(context, '/players'),
-              ),
-              const SizedBox(height: 12),
-              _sectionTile(
-                context,
-                icon: Icons.receipt_long,
-                title: 'All Installments',
-                subtitle: 'View players with their installments',
-                onTap: () => Navigator.pushNamed(context, '/installments'),
               ),
               const SizedBox(height: 12),
               _sectionTile(
