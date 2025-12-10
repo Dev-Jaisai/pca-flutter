@@ -57,16 +57,19 @@ class MyApp extends StatelessWidget {
         '/all-installments': (ctx) => const AllInstallmentsScreen(),
         '/sms-reminders': (ctx) => const SmsReminderScreen(),
         // Add InstallmentSummaryScreen route with initialMonth parameter
-        '/installment-summary': (ctx) {
-          // Get arguments if passed
-          final args = ModalRoute.of(ctx)?.settings.arguments;
-          if (args is String) {
+        '/installment-summary': (context) {
+          final args = ModalRoute.of(context)!.settings.arguments;
+
+          if (args is Map<String, dynamic>) {
+            return InstallmentSummaryScreen(
+              initialMonth: args['month'] as String?,
+              initialFilter: args['filter'] as String?,  // Pass filter to screen
+            );
+          } else if (args is String) {
+            // Backward compatibility: if only month string is passed
             return InstallmentSummaryScreen(initialMonth: args);
           }
-          // Fallback to current month
-          final now = DateTime.now();
-          final currentMonth = '${now.year}-${now.month.toString().padLeft(2, '0')}';
-          return InstallmentSummaryScreen(initialMonth: currentMonth);
+          return const InstallmentSummaryScreen();
         },
       },
 
