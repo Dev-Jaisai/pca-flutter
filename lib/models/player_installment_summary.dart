@@ -1,17 +1,18 @@
 // lib/models/player_installment_summary.dart
+
 class PlayerInstallmentSummary {
   final int playerId;
   final String playerName;
   final String? phone;
   final String? groupName;
   final DateTime? joinDate;
-
   final int? installmentId;
   final double? installmentAmount;
   final double totalPaid;
   final double? remaining;
   final DateTime? dueDate;
-  final String status; // NO_INSTALLMENT / PENDING / PARTIALLY_PAID / PAID
+  final String status;
+  final DateTime? lastPaymentDate;
 
   PlayerInstallmentSummary({
     required this.playerId,
@@ -25,41 +26,31 @@ class PlayerInstallmentSummary {
     this.remaining,
     this.dueDate,
     required this.status,
+    this.lastPaymentDate,
   });
 
   factory PlayerInstallmentSummary.fromJson(Map<String, dynamic> json) {
-    double? parseDouble(dynamic v) {
-      if (v == null) return null;
-      if (v is double) return v;
-      if (v is int) return v.toDouble();
-      return double.tryParse(v.toString());
-    }
-
-    DateTime? parseDate(dynamic v) {
-      if (v == null) return null;
-      try {
-        return DateTime.parse(v.toString());
-      } catch (_) {
-        return null;
-      }
-    }
-
     return PlayerInstallmentSummary(
-      playerId: (json['playerId'] as num).toInt(),
-      playerName: json['playerName']?.toString() ?? '',
-      phone: json['phone']?.toString(),
-      groupName: json['groupName']?.toString(),
-      joinDate: parseDate(json['joinDate']),
-      installmentId: json['installmentId'] != null ? (json['installmentId'] as num).toInt() : null,
-      installmentAmount: parseDouble(json['installmentAmount']),
-      totalPaid: parseDouble(json['totalPaid']) ?? 0.0,
-      remaining: parseDouble(json['remaining']),
-      dueDate: parseDate(json['dueDate']),
-      status: json['status']?.toString() ?? 'NO_INSTALLMENT',
+      playerId: json['playerId'] ?? 0,
+      playerName: json['playerName'] ?? '',
+      phone: json['phone'],
+      groupName: json['groupName'],
+      joinDate: json['joinDate'] != null ? DateTime.parse(json['joinDate']) : null,
+      installmentId: json['installmentId'],
+      installmentAmount: json['installmentAmount'] != null
+          ? (json['installmentAmount'] as num).toDouble()
+          : null,
+      totalPaid: (json['totalPaid'] as num?)?.toDouble() ?? 0.0,
+      remaining: (json['remaining'] as num?)?.toDouble(),
+      dueDate: json['dueDate'] != null ? DateTime.parse(json['dueDate']) : null,
+      status: json['status'] ?? 'PENDING',
+      lastPaymentDate: json['lastPaymentDate'] != null
+          ? DateTime.parse(json['lastPaymentDate'])
+          : null,
     );
   }
 
-  // --- ADD THIS METHOD ---
+  // Ensure this method is inside this class in this file!
   Map<String, dynamic> toJson() {
     return {
       'playerId': playerId,
@@ -73,6 +64,7 @@ class PlayerInstallmentSummary {
       'remaining': remaining,
       'dueDate': dueDate?.toIso8601String(),
       'status': status,
+      'lastPaymentDate': lastPaymentDate?.toIso8601String(),
     };
   }
 }

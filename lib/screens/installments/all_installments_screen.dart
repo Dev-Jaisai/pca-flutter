@@ -154,6 +154,11 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
     final color = _statusColor[p.hashCode] ?? Colors.grey;
     final dueText = _formattedDue[p.hashCode] ?? '—';
 
+    // Format the Paid Date (if available)
+    final paidDateText = p.lastPaymentDate != null
+        ? df.format(p.lastPaymentDate!)
+        : 'Unknown';
+
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
       child: Padding(
@@ -189,17 +194,30 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
                       children: [
                         Text("Amount: ₹${p.installmentAmount?.toStringAsFixed(2) ?? "0.00"}",
                             style: const TextStyle(fontSize: 12)),
-                        Text("Paid: ₹${p.totalPaid.toStringAsFixed(2)}",
-                            style: const TextStyle(fontSize: 12)),
-                        Text("Left: ${p.remaining != null ? "₹${p.remaining!.toStringAsFixed(2)}" : "—"}",
-                            style: const TextStyle(fontSize: 12)),
+
+                        // 1. ALWAYS show Due Date
                         Text("Due: $dueText",
                             style: TextStyle(
                               fontSize: 12,
-                              color: p.dueDate != null && p.dueDate!.isBefore(DateTime.now())
+                              // If overdue and NOT paid, show Red. Otherwise Grey.
+                              color: (p.status != 'PAID' && p.dueDate != null && p.dueDate!.isBefore(DateTime.now()))
                                   ? Colors.red
-                                  : Colors.grey,
+                                  : Colors.grey[800],
                             )),
+
+                        // 2. IF PAID, show Payment Date
+                        if (p.status == 'PAID' || p.totalPaid > 0)
+                          Text("Paid On: $paidDateText",
+                              style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.green
+                              )),
+
+                        // Show "Left" if not fully paid
+                        if (p.status != 'PAID')
+                          Text("Left: ${p.remaining != null ? "₹${p.remaining!.toStringAsFixed(2)}" : "—"}",
+                              style: const TextStyle(fontSize: 12)),
                       ],
                     ),
                 ],

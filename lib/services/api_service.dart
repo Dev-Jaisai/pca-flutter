@@ -131,8 +131,7 @@ class ApiService {
           .toList();
     } else {
       throw Exception(
-          'Failed to load installments: ${response.statusCode} - ${response
-              .body}');
+          'Failed to load installments: ${response.statusCode} - ${response.body}');
     }
   }
 
@@ -160,8 +159,7 @@ class ApiService {
 
     if (response.statusCode != 200 && response.statusCode != 201) {
       throw Exception(
-          'Failed to create installment: ${response.statusCode} - ${response
-              .body}');
+          'Failed to create installment: ${response.statusCode} - ${response.body}');
     }
   }
 
@@ -224,8 +222,7 @@ class ApiService {
       return null;
     } else {
       throw Exception(
-          'Failed to fetch effective fee: ${response.statusCode} - ${response
-              .body}');
+          'Failed to fetch effective fee: ${response.statusCode} - ${response.body}');
     }
   }
 
@@ -252,8 +249,7 @@ class ApiService {
 
     if (response.statusCode != 200 && response.statusCode != 201) {
       throw Exception(
-          'Failed to record payment: ${response.statusCode} - ${response
-              .body}');
+          'Failed to record payment: ${response.statusCode} - ${response.body}');
     }
   }
 
@@ -294,18 +290,16 @@ class ApiService {
           .toList();
     } else {
       throw Exception(
-          'Failed to load installment status: ${response.statusCode} ${response
-              .body}');
+          'Failed to load installment status: ${response.statusCode} ${response.body}');
     }
   }
-
-
 
   // ---------------- Installment Summary (all players for month YYYY-MM) ----------------
   static Future<List<PlayerInstallmentSummary>> fetchInstallmentSummary(
       String yearMonth) async {
+    // UPDATE: Now points to the correct endpoint in InstallmentController
     final url = Uri.parse(
-        '$baseUrl/api/players/installment-summary?month=$yearMonth');
+        '$baseUrl/api/installments/summary?month=$yearMonth');
     final response = await http.get(url);
     if (response.statusCode == 200) {
       final List<dynamic> data = json.decode(response.body);
@@ -314,8 +308,7 @@ class ApiService {
           PlayerInstallmentSummary.fromJson(e as Map<String, dynamic>))
           .toList();
     } else {
-      throw Exception('Failed to load installment summary: ${response
-          .statusCode} - ${response.body}');
+      throw Exception('Failed to load installment summary: ${response.statusCode} - ${response.body}');
     }
   }
 
@@ -342,12 +335,13 @@ class ApiService {
     );
     if (response.statusCode != 200 && response.statusCode != 201) {
       throw Exception(
-          'Failed to create installment: ${response.statusCode} - ${response
-              .body}');
+          'Failed to create installment: ${response.statusCode} - ${response.body}');
     }
   }
+
   static Future<List<PlayerInstallmentSummary>> fetchAllInstallmentsSummary() async {
-    final url = Uri.parse('$baseUrl/api/players/installment-summary/all');
+    // UPDATE: Now points to the correct endpoint in InstallmentController
+    final url = Uri.parse('$baseUrl/api/installments/all-summary');
     final response = await http.get(url);
     if (response.statusCode == 200) {
       final List<dynamic> data = json.decode(response.body);
@@ -357,8 +351,7 @@ class ApiService {
           .toList();
     } else {
       throw Exception(
-          'Failed to load all installments: ${response.statusCode} - ${response
-              .body}');
+          'Failed to load all installments: ${response.statusCode} - ${response.body}');
     }
   }
 
@@ -369,7 +362,8 @@ class ApiService {
     if (resp.statusCode == 200) {
       return json.decode(resp.body) as Map<String, dynamic>;
     } else {
-      throw Exception('Failed to fetch latest month: ${resp.statusCode} - ${resp.body}');
+      throw Exception(
+          'Failed to fetch latest month: ${resp.statusCode} - ${resp.body}');
     }
   }
   // ADD THESE METHODS TO YOUR EXISTING ApiService class
@@ -395,6 +389,4 @@ class ApiService {
       throw Exception('Failed to load fees: $e');
     }
   }
-
-
 }
