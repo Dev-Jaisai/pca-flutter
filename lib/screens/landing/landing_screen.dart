@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../home/add_player_screen.dart';
 import '../../widgets/dashboard_stats.dart';
 import '../installments/installment_summary_screen.dart';
+import '../reminders/sms_reminder_screen.dart';
 
 class LandingScreen extends StatefulWidget {
   const LandingScreen({super.key});
@@ -12,87 +13,157 @@ class LandingScreen extends StatefulWidget {
 }
 
 class _LandingScreenState extends State<LandingScreen> {
-  // path and provider for background
   final String _bgPath = 'assets/images/cricket_bg.webp';
   late ImageProvider _bgImage;
 
   @override
   void initState() {
     super.initState();
-    // temporary fallback provider — will be replaced in didChangeDependencies with ResizeImage
     _bgImage = AssetImage(_bgPath);
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // compute an appropriate cacheWidth to reduce decode cost
     final mq = MediaQuery.of(context);
     final devicePixelRatio = mq.devicePixelRatio;
     final screenWidth = mq.size.width;
     final cacheWidth = (screenWidth * devicePixelRatio).round();
 
-    // Use ResizeImage so Flutter decodes just what's needed
     _bgImage = ResizeImage(const AssetImage('assets/images/cricket_bg.webp'), width: cacheWidth);
-
-    // Precache the resized image
     precacheImage(_bgImage, context);
   }
 
-  void _open(BuildContext context, String routeName) {
-    try {
-      Navigator.pushNamed(context, routeName);
-    } catch (_) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Route not implemented: $routeName')),
-      );
-    }
+  Widget _buildQuickActionCard({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+    bool isLarge = false,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: isLarge ? double.infinity : null,
+        padding: isLarge
+            ? const EdgeInsets.symmetric(horizontal: 20, vertical: 16)
+            : const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: color.withOpacity(0.15),
+              blurRadius: 15,
+              offset: const Offset(0, 4),
+            ),
+          ],
+          border: Border.all(color: color.withOpacity(0.2)),
+        ),
+        child: Row(
+          mainAxisSize: isLarge ? MainAxisSize.max : MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, size: isLarge ? 24 : 20, color: color),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: isLarge ? 16 : 14,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey.shade800,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (isLarge)
+              Icon(Icons.chevron_right, color: color.withOpacity(0.6)),
+          ],
+        ),
+      ),
+    );
   }
 
-  Widget _card(
-      BuildContext ctx, {
-        required IconData icon,
-        required String title,
-        required String subtitle,
-        required VoidCallback onTap,
-        Color? color,
-      }) {
-    final c = color ?? Colors.deepPurple;
-
+  Widget _buildFeatureCard({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
     return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      elevation: 4,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+      ),
+      elevation: 0,
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: onTap, // whole card clickable
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            gradient: LinearGradient(
+              colors: [
+                color.withOpacity(0.05),
+                color.withOpacity(0.02),
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            border: Border.all(color: Colors.grey.shade100),
+          ),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
+                padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: c.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(10),
+                  color: color.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(14),
                 ),
-                padding: const EdgeInsets.all(12),
-                child: Icon(icon, size: 28, color: c),
+                child: Icon(
+                  icon,
+                  size: 28,
+                  color: color,
+                ),
               ),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.black87,
+                      ),
+                    ),
                     const SizedBox(height: 6),
-                    Text(subtitle, style: TextStyle(color: Colors.grey[700], fontSize: 13)),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey.shade600,
+                        height: 1.4,
+                      ),
+                    ),
                   ],
                 ),
               ),
-              // chevron is an IconButton so it navigates too
-              IconButton(
-                icon: const Icon(Icons.chevron_right, color: Colors.grey),
-                onPressed: onTap,
+              Icon(
+                Icons.chevron_right,
+                color: Colors.grey.shade400,
+                size: 24,
               ),
             ],
           ),
@@ -101,201 +172,246 @@ class _LandingScreenState extends State<LandingScreen> {
     );
   }
 
-  void _showQuickActionsSheet(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: false,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) {
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 18.0, vertical: 18),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(4))),
-              const SizedBox(height: 12),
-              const Text('Quick actions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              ListTile(
-                leading: const Icon(Icons.person_add),
-                title: const Text('Add Player'),
-                subtitle: const Text('Open add player form'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => const AddPlayerScreen()));
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.schedule),
-                title: const Text('Create Installments (All)'),
-                subtitle: const Text('Generate monthly installments for all players'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Installment generation triggered (demo)')));
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.payment),
-                title: const Text('Payments'),
-                subtitle: const Text('Open payments screen'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  final now = DateTime.now();
-                  final currentMonth = '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}';
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => InstallmentSummaryScreen(initialMonth: currentMonth)));
-                },
-              ),
-              const SizedBox(height: 8),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final now = DateTime.now();
+    final currentMonth = '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}';
 
     return Scaffold(
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _showQuickActionsSheet(context),
-        child: const Icon(Icons.add),
-      ),
       body: Stack(
         children: [
-          // Background image (uses pre-cached ResizeImage)
-          Positioned.fill(
-            child: Image(
-              image: _bgImage,
-              fit: BoxFit.cover,
-              color: Colors.white.withOpacity(0.86),
-              colorBlendMode: BlendMode.modulate,
-              frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-                if (wasSynchronouslyLoaded) return child;
-                return AnimatedOpacity(
-                  opacity: frame == null ? 0 : 1,
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeOut,
-                  child: child,
-                );
-              },
-            ),
-          ),
-
-          // subtle gradient overlay for contrast
+          // Background Image with Gradient Overlay
           Positioned.fill(
             child: Container(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: [Colors.white.withOpacity(0.0), Colors.white.withOpacity(0.85)],
-                  stops: const [0.0, 0.9],
+                  colors: [
+                    Colors.deepPurple.shade50,
+                    Colors.white,
+                  ],
+                  stops: const [0.0, 0.6],
                 ),
+              ),
+              child: Image(
+                image: _bgImage,
+                fit: BoxFit.cover,
+                opacity: const AlwaysStoppedAnimation(0.1),
               ),
             ),
           ),
 
-          // Main content
           SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // header
+                  // Header Section
                   Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text('Welcome, Coach', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                            const SizedBox(height: 6),
-                            Text('Manage players, fees, installments and payments', style: TextStyle(color: Colors.grey[700])),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Hello, Coach!',
+                            style: TextStyle(
+                              fontSize: 28,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.grey.shade900,
+                              letterSpacing: -0.5,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Manage your academy efficiently',
+                            style: TextStyle(
+                              fontSize: 15,
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              Colors.deepPurple.shade600,
+                              Colors.purple.shade600,
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.deepPurple.shade300.withOpacity(0.3),
+                              blurRadius: 15,
+                              offset: const Offset(0, 4),
+                            ),
                           ],
+                        ),
+                        child: const Icon(
+                          Icons.sports_cricket,
+                          size: 28,
+                          color: Colors.white,
                         ),
                       ),
-                      CircleAvatar(radius: 22, backgroundColor: Colors.deepPurple.shade100, child: const Icon(Icons.sports_cricket, color: Colors.white)),
                     ],
                   ),
-                  const SizedBox(height: 18),
 
-                  // Dashboard
+                  const SizedBox(height: 24),
+
+                  // Dashboard Stats
                   const DashboardStats(),
-                  const SizedBox(height: 20),
 
-                  // Feature cards + actions
-                  Expanded(
-                    child: ListView(
-                      children: [
-                        _card(
-                          context,
-                          icon: Icons.list_alt,
-                          title: 'All Installments',
-                          subtitle: 'View all players with their installments (not month-filtered)',
-                          onTap: () => Navigator.pushNamed(context, '/all-installments'),
-                          color: Colors.blue,
-                        ),
-                        _card(
-                          context,
-                          icon: Icons.people,
-                          title: 'Manage Player',
-                          subtitle: 'View all players, add or delete players',
-                          onTap: () => _open(context, '/players'),
-                          color: Colors.teal,
-                        ),
+                  const SizedBox(height: 32),
 
-                        _card(
-                          context,
-                          icon: Icons.group_add,
-                          title: 'Groups',
-                          subtitle: 'Create & manage player groups (Junior / Senior ...)',
-                          onTap: () => _open(context, '/groups'),
-                          color: Colors.indigo,
+                  // Quick Actions Section
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Quick Actions',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.grey.shade800,
                         ),
-                        _card(
-                          context,
-                          icon: Icons.monetization_on,
-                          title: 'Fee Structures',
-                          subtitle: 'Define monthly fees per group',
-                          onTap: () => _open(context, '/fees'),
-                          color: Colors.deepPurple,
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.deepPurple.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
                         ),
-                        _card(
-                          context,
-                          icon: Icons.sms,
-                          title: 'SMS Reminders',
-                          subtitle: 'Send due date reminders to players',
-                          onTap: () => Navigator.pushNamed(context, '/sms-reminders'),
-                          color: Colors.green,
+                        child: const Text(
+                          'Most Used',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.deepPurple,
+                          ),
                         ),
-                        const SizedBox(height: 14),
+                      ),
+                    ],
+                  ),
 
-                        Text('Quick Actions', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
-                        const SizedBox(height: 10),
-                        Wrap(
-                          spacing: 10,
-                          runSpacing: 10,
-                          children: [
-                            ActionChip(label: const Text('Add Player'), avatar: const Icon(Icons.add), onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AddPlayerScreen()))),
-                            ActionChip(label: const Text('Create Installment (all)'), avatar: const Icon(Icons.schedule), onPressed: () => _showQuickActionsSheet(context)),
-                            ActionChip(label: const Text('View Players'), avatar: const Icon(Icons.list), onPressed: () => Navigator.pushNamed(context, '/players')),
-                            ActionChip(label: const Text('Payments'), avatar: const Icon(Icons.payment), onPressed: () {
-                              final now = DateTime.now();
-                              final currentMonth = '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}';
-                              Navigator.push(context, MaterialPageRoute(builder: (_) => InstallmentSummaryScreen(initialMonth: currentMonth)));
-                            }),
-                          ],
+                  const SizedBox(height: 16),
+
+                  // Large Quick Action Cards
+                  Column(
+                    children: [
+                      _buildQuickActionCard(
+                        icon: Icons.add_circle,
+                        label: 'Add New Player',
+                        color: Colors.green.shade600,
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const AddPlayerScreen()),
                         ),
-                        const SizedBox(height: 30),
-                      ],
+                        isLarge: true,
+                      ),
+                      const SizedBox(height: 12),
+                      _buildQuickActionCard(
+                        icon: Icons.payment,
+                        label: 'View Payments & Dues',
+                        color: Colors.blue.shade600,
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => InstallmentSummaryScreen(initialMonth: currentMonth),
+                          ),
+                        ),
+                        isLarge: true,
+                      ),
+                      const SizedBox(height: 12),
+                      _buildQuickActionCard(
+                        icon: Icons.notifications,
+                        label: 'Send Reminders',
+                        color: Colors.orange.shade600,
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const SmsReminderScreen()),
+                        ),
+                        isLarge: true,
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 32),
+
+                  // All Features Section
+                  Text(
+                    'All Features',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.grey.shade800,
                     ),
                   ),
+
+                  const SizedBox(height: 16),
+
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      _buildQuickActionCard(
+                        icon: Icons.list_alt,
+                        label: 'All Installments',
+                        color: Colors.teal.shade600,
+                        onTap: () => Navigator.pushNamed(context, '/all-installments'),
+                      ),
+                      _buildQuickActionCard(
+                        icon: Icons.people,
+                        label: 'Manage Players',
+                        color: Colors.purple.shade600,
+                        onTap: () => Navigator.pushNamed(context, '/players'),
+                      ),
+                      _buildQuickActionCard(
+                        icon: Icons.group,
+                        label: 'Groups',
+                        color: Colors.indigo.shade600,
+                        onTap: () => Navigator.pushNamed(context, '/groups'),
+                      ),
+                      _buildQuickActionCard(
+                        icon: Icons.monetization_on,
+                        label: 'Fee Structures',
+                        color: Colors.amber.shade700,
+                        onTap: () => Navigator.pushNamed(context, '/fees'),
+                      ),
+                      // Removed: Payment History, Reports, Settings as requested
+                    ],
+                  ),
+
+                  const SizedBox(height: 32),
+
+                  // Space for bottom navigation
                 ],
               ),
+            ),
+          ),
+
+          // Floating Action Button
+          Positioned(
+            bottom: 20,
+            right: 20,
+            child: FloatingActionButton(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const AddPlayerScreen()),
+              ),
+              backgroundColor: Colors.deepPurple.shade600,
+              foregroundColor: Colors.white,
+              elevation: 4,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Icon(Icons.add, size: 28),
             ),
           ),
         ],
