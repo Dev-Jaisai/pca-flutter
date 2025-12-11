@@ -2,10 +2,11 @@
 import 'package:flutter/material.dart';
 import '../../models/player.dart';
 import '../../services/api_service.dart';
-import '../../services/data_manager.dart'; // DataManager (RAM + Hive)
+import '../../services/data_manager.dart';
 import '../../services/player_shimmer_list.dart';
 import '../installments/installments_screen.dart';
 import 'add_player_screen.dart';
+import 'edit_player_screen.dart'; // Import your edit screen
 import '../../utils/event_bus.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -15,86 +16,49 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  // Show shimmer when we have no data at all (cold start)
   bool _showShimmer = true;
-
-  // Actual list/map used by UI
   List<Player> _players = [];
-  Map<int, bool> _installmentMap = {};
-
-  // Small flag to indicate background fetch in progress if you want to show indicator later
   bool _bgFetching = false;
 
   @override
   void initState() {
     super.initState();
     _initialLoad();
-    // Also listen for external events (add/delete) so we refresh cache/UI if needed
     EventBus().stream.listen((event) {
-      if ([
-        'added',
-        'deleted',
-        'updated',
-        'installment_created',
-        'installment_deleted',
-        'payment_recorded'
-      ].contains(event.action)) {
-        // Fetch fresh data in background when such events happen
+      if (['added', 'deleted', 'updated'].contains(event.action)) {
         _fetchFromApi();
       }
     });
   }
 
   Future<void> _initialLoad() async {
-    // 1) FAST: try RAM -> Hive via DataManager
     final cached = DataManager().getCachedData();
     if (cached.players != null && cached.players!.isNotEmpty) {
       setState(() {
         _players = cached.players!;
-        _installmentMap = cached.status ?? {};
-        _showShimmer = false; // show actual data instantly
+        _showShimmer = false;
       });
     }
-
-    // 2) ALWAYS: fetch fresh data in background and update UI + cache
     await _fetchFromApi();
   }
 
   Future<void> _fetchFromApi() async {
     try {
       setState(() => _bgFetching = true);
+      // We only need players now, installment status is not needed for the list UI anymore
+      final players = await ApiService.fetchPlayers();
 
-      final results = await Future.wait([
-        ApiService.fetchPlayers(),
-        ApiService.fetchInstallmentStatus(),
-      ]);
-
-      final players = results[0] as List<Player>;
-      final statuses = results[1] as List<dynamic>; // expected objects with playerId & hasInstallments
-
-      // Save to RAM + Hive
-      await DataManager().saveData(players, statuses);
-
-      // Build status map for UI
-      final statusMap = <int, bool>{
-        for (final s in statuses) s.playerId: s.hasInstallments
-      };
+      // Save to RAM + Hive (passing empty list for statuses since we don't use them on card)
+      await DataManager().saveData(players, []);
 
       if (!mounted) return;
       setState(() {
         _players = players;
-        _installmentMap = statusMap;
         _showShimmer = false;
       });
     } catch (e) {
       debugPrint('HomeScreen: fetchFromApi failed: $e');
-      // If we had no cached data at all, stop shimmer so user doesn't hang
-      if (mounted && _players.isEmpty) {
-        setState(() => _showShimmer = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Unable to refresh data — showing cached data if available')),
-        );
-      }
+      if (mounted && _players.isEmpty) setState(() => _showShimmer = false);
     } finally {
       if (mounted) setState(() => _bgFetching = false);
     }
@@ -120,23 +84,11 @@ class _HomeScreenState extends State<HomeScreen> {
     if (shouldDelete == true) {
       try {
         await ApiService.deletePlayer(id);
-        // Fire event so other widgets can update
         EventBus().fire(PlayerEvent('deleted'));
-
-        // Remove from UI immediately for snappy feel
-        if (!mounted) return;
-        setState(() {
-          _players.removeWhere((p) => p.id == id);
-          _installmentMap.remove(id);
-        });
-
-        // Also refresh cache by fetching from API; if you prefer you could remove from DataManager instead
         _fetchFromApi();
-
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$name deleted')));
+        if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$name deleted')));
       } catch (e) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete failed: $e')));
+        if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete failed: $e')));
       }
     }
   }
@@ -145,21 +97,22 @@ class _HomeScreenState extends State<HomeScreen> {
     final created = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => const AddPlayerScreen()));
     if (created == true) {
       EventBus().fire(PlayerEvent('added'));
-      // Fetch fresh data (in background)
       _fetchFromApi();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final bg = const Color(0xFFFBF8FF);
-    final cardRadius = 14.0;
-    final accent = const Color(0xFF9B6CFF);
+    const bg = Color(0xFFFBF8FF);
+    const accent = Color(0xFF9B6CFF);
 
     return Scaffold(
       backgroundColor: bg,
       appBar: AppBar(
-        title: const Text('Players'),
+        title: const Text('Players Directory'),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        foregroundColor: Colors.black87,
         actions: [
           IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh)),
         ],
@@ -168,135 +121,110 @@ class _HomeScreenState extends State<HomeScreen> {
           ? const PlayerShimmerList()
           : RefreshIndicator(
         onRefresh: _refresh,
-        edgeOffset: 80,
         color: accent,
         child: _players.isEmpty
-            ? ListView(
-          // allow pull-to-refresh even when empty
-          children: const [SizedBox(height: 120), Center(child: Text('No players found'))],
-        )
+            ? ListView(children: const [SizedBox(height: 120), Center(child: Text('No players found'))])
             : ListView.builder(
-          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
           itemCount: _players.length,
           itemBuilder: (context, index) {
             final p = _players[index];
-            final hasInstallments = _installmentMap[p.id] ?? false;
-
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Material(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(cardRadius),
-                elevation: 6,
-                shadowColor: Colors.black12,
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(cardRadius),
-                  onTap: () async {
-                    final changed = await Navigator.push<bool>(
-                      context,
-                      MaterialPageRoute(builder: (_) => InstallmentsScreen(player: p)),
-                    );
-                    if (changed == true) _fetchFromApi();
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
-                    child: Row(
-                      children: [
-                        CircleAvatar(
-                          radius: 28,
-                          backgroundColor: Colors.grey.shade100,
-                          backgroundImage: (p.photoUrl != null && p.photoUrl!.isNotEmpty)
-                              ? NetworkImage(p.photoUrl!)
-                              : null,
-                          child: (p.photoUrl == null || p.photoUrl!.isEmpty)
-                              ? Text(_initials(p.name),
-                              style: const TextStyle(fontWeight: FontWeight.w700, color: Colors.black87))
-                              : null,
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(p.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-                              const SizedBox(height: 6),
-                              Row(
-                                children: [
-                                  if ((p.group ?? '').isNotEmpty)
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                      decoration: BoxDecoration(
-                                        color: Colors.grey.shade100,
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: Text(p.group!, style: const TextStyle(fontSize: 12, color: Colors.black87)),
-                                    ),
-                                  const SizedBox(width: 8),
-                                  Text(p.phone ?? '', style: const TextStyle(fontSize: 13, color: Colors.black54)),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              if (p.notes != null && p.notes!.isNotEmpty)
-                                Text(p.notes!, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, color: Colors.black54)),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              icon: const Icon(Icons.list_alt_outlined),
-                              tooltip: 'Installments',
-                              onPressed: () async {
-                                final changed = await Navigator.push<bool>(
-                                  context,
-                                  MaterialPageRoute(builder: (_) => InstallmentsScreen(player: p)),
-                                );
-                                if (changed == true) _fetchFromApi();
-                              },
-                            ),
-                            const SizedBox(height: 4),
-                            if (!hasInstallments)
-                              IconButton(
-                                icon: const Icon(Icons.add_circle_outline, color: Color(0xFF9B6CFF)),
-                                tooltip: 'Create installment',
-                                onPressed: () async {
-                                  final created = await Navigator.push<bool>(
-                                    context,
-                                    MaterialPageRoute(builder: (_) => InstallmentsScreen(player: p)),
-                                  );
-                                  if (created == true) _fetchFromApi();
-                                },
-                              ),
-                            IconButton(
-                              icon: const Icon(Icons.delete, color: Colors.redAccent),
-                              onPressed: () => _confirmDelete(p.id, p.name),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            );
+            return _buildPlayerCard(p);
           },
         ),
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _openAddPlayerForm,
-        icon: const Icon(Icons.add),
+        icon: const Icon(Icons.person_add),
         label: const Text('Add Player'),
         backgroundColor: accent,
       ),
     );
   }
 
-  String _initials(String? name) {
-    if (name == null || name.trim().isEmpty) return '';
-    final parts = name.trim().split(RegExp(r'\s+'));
-    if (parts.length == 1) return parts.first.substring(0, 1).toUpperCase();
-    return (parts[0][0] + parts[1][0]).toUpperCase();
+  Widget _buildPlayerCard(Player p) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 3)),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          // Tapping the card opens the Profile / Installments screen
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => InstallmentsScreen(player: p)),
+            ).then((_) => _fetchFromApi());
+          },
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Row(
+              children: [
+                // Avatar
+                CircleAvatar(
+                  radius: 26,
+                  backgroundColor: Colors.deepPurple.shade50,
+                  backgroundImage: (p.photoUrl != null && p.photoUrl!.isNotEmpty)
+                      ? NetworkImage(p.photoUrl!)
+                      : null,
+                  child: (p.photoUrl == null || p.photoUrl!.isEmpty)
+                      ? Text(
+                    p.name.isNotEmpty ? p.name[0].toUpperCase() : '?',
+                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple.shade700, fontSize: 18),
+                  )
+                      : null,
+                ),
+                const SizedBox(width: 16),
+
+                // Info
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(p.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 4),
+                      Text(
+                        "${p.group ?? 'No Group'} • ${p.phone ?? ''}",
+                        style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Actions: Edit & Delete ONLY
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.edit_outlined, color: Colors.blue, size: 22),
+                      tooltip: 'Edit Details',
+                      onPressed: () async {
+                        final updated = await Navigator.push<bool>(
+                          context,
+                          MaterialPageRoute(builder: (_) => EditPlayerScreen(player: p)),
+                        );
+                        if (updated == true) _fetchFromApi();
+                      },
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, color: Colors.red, size: 22),
+                      tooltip: 'Delete',
+                      onPressed: () => _confirmDelete(p.id, p.name),
+                    ),
+                  ],
+                )
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
