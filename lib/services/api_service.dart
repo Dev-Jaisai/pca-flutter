@@ -453,4 +453,16 @@ class ApiService {
       throw Exception('Failed to record overdue payment: ${response.body}');
     }
   }
+
+  static Future<void> updatePlayer(int id, Map<String, dynamic> data) async {
+    final response = await http.put(
+      Uri.parse('$baseUrl/api/players/$id'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(data),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to update player: ${response.body}');
+    }
+  }
 }
