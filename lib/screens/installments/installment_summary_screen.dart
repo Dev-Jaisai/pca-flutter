@@ -1,4 +1,3 @@
-// lib/screens/installments/installment_summary_screen.dart
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../services/api_service.dart';
@@ -22,6 +21,13 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
   String? _error;
   List<PlayerInstallmentSummary> _items = [];
 
+  // Statistics
+  double _totalAmount = 0;
+  double _totalPaid = 0;
+  double _totalRemaining = 0;
+  int _totalCount = 0;
+  int _overdueCount = 0;
+
   @override
   void initState() {
     super.initState();
@@ -43,9 +49,6 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
     try {
       List<PlayerInstallmentSummary> list;
 
-      // If viewing "Overdue", we usually want GLOBAL overdue (past months).
-      // But if the user deliberately picks a month while in "All" or "Due" mode,
-      // we fetch that specific month's data.
       if (_filter == 'overdue') {
         list = await ApiService.fetchAllInstallmentsSummary();
       } else {
@@ -53,6 +56,8 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
       }
 
       final filtered = _applyFilter(list);
+      _calculateStats(filtered);
+
       if (mounted) setState(() => _items = filtered);
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
@@ -61,10 +66,35 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
     }
   }
 
+  void _calculateStats(List<PlayerInstallmentSummary> items) {
+    _totalAmount = 0;
+    _totalPaid = 0;
+    _totalRemaining = 0;
+    _totalCount = items.length;
+    _overdueCount = 0;
+
+    final now = DateTime.now();
+    final startOfToday = DateTime(now.year, now.month, now.day);
+
+    for (var item in items) {
+      _totalAmount += item.installmentAmount ?? 0;
+      _totalPaid += item.totalPaid ?? 0;
+      _totalRemaining += item.remaining ?? 0;
+
+      final s = _normStatus(item.status);
+      final isPaid = s == 'PAID';
+      final dueDate = item.dueDate;
+      if (!isPaid && dueDate != null && dueDate.isBefore(startOfToday)) {
+        _overdueCount++;
+      }
+    }
+  }
+
   String _normStatus(String? s) {
     if (s == null) return '';
     return s.toUpperCase().replaceAll('_', ' ').trim();
   }
+
   List<PlayerInstallmentSummary> _applyFilter(List<PlayerInstallmentSummary> list) {
     final now = DateTime.now();
     final startOfToday = DateTime(now.year, now.month, now.day);
@@ -83,7 +113,6 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
         }).toList();
 
       case 'overdue':
-      // ENHANCED: Include ALL past unpaid installments
         return list.where((p) {
           final s = _normStatus(p.status);
           final isPaid = s == 'PAID';
@@ -96,13 +125,9 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
         return list;
     }
   }
-  // --- RESTORED: Month Picker Logic ---
-  // ... inside _InstallmentSummaryScreenState class ...
 
-  // NEW: Custom Month/Year Picker using Dropdowns
   Future<void> _pickMonth() async {
     final now = DateTime.now();
-    // Parse current selection to set initial values in dropdowns
     final parts = _selectedMonth.split('-');
     int currentYear = int.parse(parts[0]);
     int currentMonth = int.parse(parts[1]);
@@ -110,77 +135,134 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
     await showDialog(
       context: context,
       builder: (context) {
-        // Local state variables for the dialog
         int tempYear = currentYear;
         int tempMonth = currentMonth;
 
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-              title: const Text("Select Month"),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              title: const Text(
+                "Select Month",
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   // Year Dropdown
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text("Year:", style: TextStyle(fontWeight: FontWeight.bold)),
-                      DropdownButton<int>(
-                        value: tempYear,
-                        // Generate years from (Current - 5) to (Current + 5)
-                        items: List.generate(11, (index) {
-                          final y = now.year - 5 + index;
-                          return DropdownMenuItem(value: y, child: Text(y.toString()));
-                        }).toList(),
-                        onChanged: (val) {
-                          if (val != null) setDialogState(() => tempYear = val);
-                        },
-                      ),
-                    ],
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey.shade200),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          "Year",
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey.shade700,
+                          ),
+                        ),
+                        DropdownButton<int>(
+                          value: tempYear,
+                          underline: const SizedBox(),
+                          items: List.generate(11, (index) {
+                            final y = now.year - 5 + index;
+                            return DropdownMenuItem(
+                              value: y,
+                              child: Text(
+                                y.toString(),
+                                style: const TextStyle(fontWeight: FontWeight.w600),
+                              ),
+                            );
+                          }).toList(),
+                          onChanged: (val) {
+                            if (val != null) setDialogState(() => tempYear = val);
+                          },
+                          borderRadius: BorderRadius.circular(12),
+                          style: TextStyle(color: Colors.grey.shade800),
+                        ),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 16),
+
                   // Month Dropdown
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text("Month:", style: TextStyle(fontWeight: FontWeight.bold)),
-                      DropdownButton<int>(
-                        value: tempMonth,
-                        items: List.generate(12, (index) {
-                          final m = index + 1;
-                          // Format month name (e.g., "January", "February")
-                          final name = DateFormat.MMMM().format(DateTime(2024, m));
-                          return DropdownMenuItem(value: m, child: Text(name));
-                        }).toList(),
-                        onChanged: (val) {
-                          if (val != null) setDialogState(() => tempMonth = val);
-                        },
-                      ),
-                    ],
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey.shade200),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          "Month",
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey.shade700,
+                          ),
+                        ),
+                        DropdownButton<int>(
+                          value: tempMonth,
+                          underline: const SizedBox(),
+                          items: List.generate(12, (index) {
+                            final m = index + 1;
+                            final name = DateFormat.MMMM().format(DateTime(2024, m));
+                            return DropdownMenuItem(
+                              value: m,
+                              child: Text(
+                                name,
+                                style: const TextStyle(fontWeight: FontWeight.w600),
+                              ),
+                            );
+                          }).toList(),
+                          onChanged: (val) {
+                            if (val != null) setDialogState(() => tempMonth = val);
+                          },
+                          borderRadius: BorderRadius.circular(12),
+                          style: TextStyle(color: Colors.grey.shade800),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: const Text("Cancel"),
+                  child: Text(
+                    "Cancel",
+                    style: TextStyle(color: Colors.grey.shade600),
+                  ),
                 ),
                 ElevatedButton(
                   onPressed: () {
-                    // Logic: "Internally select data for that month"
-                    // We construct "YYYY-MM" which the API uses to fetch the whole month's data
                     final newMonthStr = '$tempYear-${tempMonth.toString().padLeft(2, '0')}';
-
                     setState(() {
                       _selectedMonth = newMonthStr;
                     });
-
-                    // Refresh data for the new selected month
                     _load();
                     Navigator.pop(context);
                   },
-                  child: const Text("OK"),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.deepPurple.shade600,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    "Select",
+                    style: TextStyle(color: Colors.white),
+                  ),
                 ),
               ],
             );
@@ -190,16 +272,24 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
     );
   }
 
-  // ... rest of the code remains the same ...
-
   void _openPayments(PlayerInstallmentSummary row) {
     if (row.installmentId != null) {
       Navigator.push(
         context,
-        MaterialPageRoute(builder: (_) => PaymentsListScreen(installmentId: row.installmentId!, remainingAmount: row.remaining)),
+        MaterialPageRoute(
+          builder: (_) => PaymentsListScreen(
+            installmentId: row.installmentId!,
+            remainingAmount: row.remaining,
+          ),
+        ),
       );
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No installment exists for this player.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('No installment exists for this player.'),
+          backgroundColor: Colors.orange.shade600,
+        ),
+      );
     }
   }
 
@@ -214,19 +304,41 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
       builder: (ctx) {
         return StatefulBuilder(builder: (ctx2, setStateDialog) {
           return AlertDialog(
-            title: Text('Create installment for ${p.playerName}'),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            title: Text(
+              'Create Installment',
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: Colors.grey.shade800,
+              ),
+            ),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                Text(
+                  p.playerName,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey.shade700,
+                  ),
+                ),
+                const SizedBox(height: 16),
                 TextField(
                   controller: amountCtl,
                   keyboardType: TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: 'Amount'),
+                  decoration: InputDecoration(
+                    labelText: 'Amount',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    prefixIcon: const Icon(Icons.currency_rupee),
+                  ),
                 ),
-                const SizedBox(height: 10),
-                ListTile(
-                  title: Text('Due date: ${DateFormat.yMMMd().format(due)}'),
-                  trailing: const Icon(Icons.calendar_month),
+                const SizedBox(height: 16),
+                InkWell(
                   onTap: () async {
                     final d = await showDatePicker(
                       context: ctx2,
@@ -239,12 +351,71 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
                       setStateDialog(() {});
                     }
                   },
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.calendar_today,
+                          color: Colors.deepPurple.shade600,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Due Date',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey.shade600,
+                                ),
+                              ),
+                              Text(
+                                DateFormat.yMMMd().format(due),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Icon(
+                          Icons.arrow_drop_down,
+                          color: Colors.grey.shade600,
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ],
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx2, false), child: const Text('Cancel')),
-              ElevatedButton(onPressed: () => Navigator.pop(ctx2, true), child: const Text('Create')),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx2, false),
+                child: Text(
+                  'Cancel',
+                  style: TextStyle(color: Colors.grey.shade600),
+                ),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx2, true),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.deepPurple.shade600,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text(
+                  'Create',
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
             ],
           );
         });
@@ -262,139 +433,567 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
         dueDate: due,
         amount: amount,
       );
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Installment created')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Installment created successfully'),
+          backgroundColor: Colors.green.shade600,
+        ),
+      );
       await _load();
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Create failed: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Create failed: $e'),
+          backgroundColor: Colors.red.shade600,
+        ),
+      );
     }
   }
 
-  Widget _buildRow(PlayerInstallmentSummary p) {
-    final df = DateFormat('dd MMM yyyy');
+  Widget _buildFilterChip(String label, String value, IconData icon) {
+    final isSelected = _filter == value;
+    return FilterChip(
+      label: Text(label),
+      selected: isSelected,
+      onSelected: (selected) {
+        if (selected) {
+          setState(() => _filter = value);
+          _load();
+        }
+      },
+      avatar: Icon(
+        icon,
+        size: 16,
+        color: isSelected ? Colors.white : Colors.grey.shade600,
+      ),
+      selectedColor: Colors.deepPurple.shade600,
+      backgroundColor: Colors.grey.shade100,
+      labelStyle: TextStyle(
+        color: isSelected ? Colors.white : Colors.grey.shade700,
+        fontWeight: FontWeight.w600,
+      ),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+      ),
+      showCheckmark: false,
+    );
+  }
 
-    String moneyStr(double? v, {int fractionDigits = 0}) {
-      if (v == null) return '—';
-      return '₹ ${v.toStringAsFixed(fractionDigits)}';
-    }
+  Widget _buildStatsCard() {
+    final money = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
-    Color statusColor(String s) {
-      switch (s) {
-        case 'PAID': return Colors.green;
-        case 'PARTIALLY_PAID':
-        case 'PARTIALLY PAID': return Colors.orange;
-        case 'PENDING': return Colors.blueGrey;
-        case 'OVERDUE': return Colors.red;
-        default: return Colors.redAccent;
-      }
-    }
+    return Container(
+      margin: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            Colors.deepPurple.shade600,
+            Colors.purple.shade600,
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.deepPurple.shade300.withOpacity(0.3),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                _getMonthLabel(),
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.white,
+                  letterSpacing: -0.5,
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  '$_totalCount',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _buildStatItem(
+                'Total Amount',
+                money.format(_totalAmount),
+                Icons.account_balance_wallet,
+              ),
+              _buildStatItem(
+                'Total Paid',
+                money.format(_totalPaid),
+                Icons.payment,
+                color: Colors.green.shade300,
+              ),
+              _buildStatItem(
+                'Pending',
+                money.format(_totalRemaining),
+                Icons.pending_actions,
+                color: Colors.orange.shade300,
+              ),
+            ],
+          ),
+          if (_overdueCount > 0) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.red.shade600.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.red.shade400.withOpacity(0.3)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.warning_amber,
+                    size: 16,
+                    color: Colors.red.shade300,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '$_overdueCount overdue payment${_overdueCount > 1 ? 's' : ''}',
+                    style: TextStyle(
+                      color: Colors.red.shade100,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 
-    final isOverdue = p.dueDate != null && p.dueDate!.isBefore(DateTime.now()) && _normStatus(p.status) != 'PAID';
-    final displayStatus = isOverdue && _filter == 'overdue' ? 'OVERDUE' : p.status;
-    final displayColor = isOverdue && _filter == 'overdue' ? Colors.red : statusColor(p.status);
-
-    final leftColumn = Column(
+  Widget _buildStatItem(String label, String value, IconData icon, {Color? color}) {
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          p.playerName,
-          style: const TextStyle(fontWeight: FontWeight.w600),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        const SizedBox(height: 6),
-        Text(
-          '${p.groupName ?? ''} • ${p.phone ?? ''}'.trim(),
-          style: TextStyle(color: Colors.grey[700], fontSize: 13),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        const SizedBox(height: 8),
         Row(
           children: [
-            Flexible(
-              child: Text('Due: ${p.dueDate != null ? df.format(p.dueDate!) : '—'}',
-                  style: TextStyle(color: Colors.grey[700], fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
+            Icon(
+              icon,
+              size: 14,
+              color: color ?? Colors.white.withOpacity(0.8),
             ),
-            const SizedBox(width: 8),
-            Chip(
-              label: Text(displayStatus, style: const TextStyle(fontSize: 12, color: Colors.white)),
-              backgroundColor: displayColor,
-              visualDensity: VisualDensity.compact,
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                color: Colors.white.withOpacity(0.9),
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ],
         ),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+            color: Colors.white,
+            letterSpacing: -0.3,
+          ),
+        ),
       ],
     );
+  }
 
-    final rightColumn = Column(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // FITTED BOX FIX: Prevents overflow
-        Flexible(
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerRight,
-            child: Text(
-              'Total: ${moneyStr(p.installmentAmount)}',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+  String _getMonthLabel() {
+    if (_filter == 'overdue') return 'Overdue Payments';
+
+    final parts = _selectedMonth.split('-');
+    final y = int.tryParse(parts[0]) ?? DateTime.now().year;
+    final m = int.tryParse(parts[1]) ?? DateTime.now().month;
+    return DateFormat.yMMMM().format(DateTime(y, m));
+  }
+
+  Widget _buildPlayerCard(PlayerInstallmentSummary p) {
+    final df = DateFormat('dd MMM yyyy');
+    final money = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
+
+    String moneyStr(double? v) {
+      if (v == null) return '—';
+      return money.format(v);
+    }
+
+    Color getStatusColor(String s) {
+      switch (s) {
+        case 'PAID': return Colors.green.shade600;
+        case 'PARTIALLY_PAID':
+        case 'PARTIALLY PAID': return Colors.orange.shade600;
+        case 'PENDING': return Colors.blueGrey.shade600;
+        case 'OVERDUE': return Colors.red.shade600;
+        default: return Colors.redAccent.shade400;
+      }
+    }
+
+    final now = DateTime.now();
+    final startOfToday = DateTime(now.year, now.month, now.day);
+    final isOverdue = p.dueDate != null && p.dueDate!.isBefore(startOfToday) && _normStatus(p.status) != 'PAID';
+    final displayStatus = isOverdue ? 'OVERDUE' : p.status;
+    final statusColor = getStatusColor(displayStatus);
+    final progress = p.installmentAmount != null && p.installmentAmount! > 0
+        ? (p.totalPaid ?? 0) / p.installmentAmount!
+        : 0.0;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 20,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: p.installmentId != null ? () => _openPayments(p) : null,
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              children: [
+                // Top row: Avatar, name, and status
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      height: 48,
+                      width: 48,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            Colors.deepPurple.shade400,
+                            Colors.purple.shade400,
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Center(
+                        child: Text(
+                          p.playerName.isNotEmpty ? p.playerName[0].toUpperCase() : '?',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+
+                    // Player info
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            p.playerName,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.deepOrangeAccent,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            p.groupName ?? 'No group',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          if (p.phone != null && p.phone!.isNotEmpty)
+                            Text(
+                              p.phone!,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey.shade500,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+
+                    // Status badge
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: statusColor.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: statusColor.withOpacity(0.3)),
+                      ),
+                      child: Text(
+                        displayStatus.replaceAll('_', ' '),
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: statusColor,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 16),
+
+                // Due date and progress
+                Row(
+                  children: [
+                    Icon(
+                      Icons.calendar_today,
+                      size: 16,
+                      color: Colors.grey.shade600,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Due: ${p.dueDate != null ? df.format(p.dueDate!) : 'Not set'}',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey.shade700,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    if (progress > 0)
+                      Text(
+                        '${(progress * 100).toStringAsFixed(0)}%',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: progress >= 1 ? Colors.green.shade600 : Colors.orange.shade600,
+                        ),
+                      ),
+                  ],
+                ),
+
+                const SizedBox(height: 12),
+
+                // Progress bar
+                if (p.installmentAmount != null && p.installmentAmount! > 0)
+                  LinearProgressIndicator(
+                    value: progress.clamp(0.0, 1.0),
+                    backgroundColor: Colors.grey.shade200,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      progress >= 1 ? Colors.green.shade400 : Colors.orange.shade400,
+                    ),
+                    borderRadius: BorderRadius.circular(4),
+                    minHeight: 6,
+                  ),
+
+                const SizedBox(height: 16),
+
+                // Amount row
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    _buildAmountChip(
+                      'Total',
+                      moneyStr(p.installmentAmount),
+                      Icons.currency_rupee,
+                      Colors.blue.shade600,
+                    ),
+                    _buildAmountChip(
+                      'Paid',
+                      moneyStr(p.totalPaid),
+                      Icons.check_circle,
+                      Colors.green.shade600,
+                    ),
+                    _buildAmountChip(
+                      'Remaining',
+                      moneyStr(p.remaining),
+                      Icons.pending,
+                      Colors.orange.shade600,
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 16),
+
+                // Action buttons
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => _openPayments(p),
+                        icon: Icon(
+                          Icons.receipt_long,
+                          size: 18,
+                          color: Colors.grey.shade700,
+                        ),
+                        label: Text(
+                          p.installmentId == null ? 'No Payments' : 'View Payments',
+                          style: TextStyle(
+                            color: Colors.grey.shade700,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          side: BorderSide(color: Colors.grey.shade300),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    if (p.installmentId == null)
+                      ElevatedButton.icon(
+                        onPressed: () => _createInstallment(p),
+                        icon: const Icon(Icons.add_circle, size: 18),
+                        label: const Text('Create'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.deepPurple.shade600,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          elevation: 0,
+                        ),
+                      ),
+                  ],
+                ),
+              ],
             ),
           ),
         ),
-        const SizedBox(height: 6),
-        Flexible(
-          child: Text(
-            'Paid: ${moneyStr(p.totalPaid)}',
-            style: TextStyle(color: Colors.grey[800], fontSize: 12),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.right,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Flexible(
-          child: Text(
-            'Left: ${p.remaining == null ? '—' : '₹ ${p.remaining!.toStringAsFixed(0)}'}',
-            style: TextStyle(color: Colors.grey[800], fontSize: 12),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.right,
-          ),
-        ),
-      ],
+      ),
     );
+  }
 
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+  Widget _buildAmountChip(String label, String value, IconData icon, Color color) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.2)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 14,
+                color: color,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: color,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w800,
+              color: Colors.grey.shade800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        padding: const EdgeInsets.symmetric(horizontal: 40),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            CircleAvatar(
-              radius: 20,
-              backgroundColor: Colors.deepPurple.shade100,
-              child: Text(
-                (p.playerName.isNotEmpty ? p.playerName[0].toUpperCase() : '?'),
-                style: const TextStyle(color: Colors.white),
+            Container(
+              height: 160,
+              width: 160,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    Colors.deepPurple.shade50,
+                    Colors.deepPurple.shade100.withOpacity(0.8),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.deepPurple.shade100, width: 2),
+              ),
+              child: Icon(
+                Icons.people,
+                size: 70,
+                color: Colors.deepPurple.shade400,
               ),
             ),
-            const SizedBox(width: 12),
-            Expanded(child: leftColumn),
-            const SizedBox(width: 8),
-            ConstrainedBox(
-              constraints: const BoxConstraints(minWidth: 70, maxWidth: 140),
-              child: rightColumn,
+            const SizedBox(height: 32),
+            Text(
+              _filter == 'overdue' ? 'No Overdue Payments' : 'No Installments Found',
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.w800,
+                color: Colors.grey.shade800,
+                letterSpacing: -0.5,
+              ),
             ),
-            const SizedBox(width: 8),
-            Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                p.installmentId == null
-                    ? IconButton(icon: const Icon(Icons.add_circle_outline), tooltip: 'Create installment', onPressed: () => _createInstallment(p))
-                    : IconButton(icon: const Icon(Icons.payment), tooltip: 'View payments', onPressed: () => _openPayments(p)),
-              ],
+            const SizedBox(height: 12),
+            Text(
+              _filter == 'overdue'
+                  ? 'Great! All payments are up to date.'
+                  : 'No players found for the selected month and filter.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 15,
+                color: Colors.grey.shade600,
+                height: 1.4,
+              ),
             ),
           ],
         ),
@@ -404,52 +1003,123 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Dynamic Title Logic based on Selected Month
-    final yearMonthLabel = () {
-      final parts = _selectedMonth.split('-');
-      final y = int.tryParse(parts[0]) ?? DateTime.now().year;
-      final m = int.tryParse(parts[1]) ?? DateTime.now().month;
-      return DateFormat.yMMMM().format(DateTime(y, m));
-    }();
-
-    String titleText;
-    if (_filter == 'overdue') {
-      titleText = 'Overdue Payments';
-    } else if (_filter == 'due') {
-      titleText = '$yearMonthLabel Dues';
-    } else if (_filter == 'pending') {
-      titleText = '$yearMonthLabel Pending';
-    } else {
-      titleText = 'Installments — $yearMonthLabel';
-    }
-
-    // Only show calendar if NOT in "Global Overdue" mode
-    final bool showCalendar = _filter != 'overdue';
-
     return Scaffold(
-      appBar: AppBar(
-        title: Text(titleText),
-        actions: [
-          // --- RESTORED: Calendar Icon ---
-          if (showCalendar)
-            IconButton(icon: const Icon(Icons.calendar_today), onPressed: _pickMonth),
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
+      backgroundColor: const Color(0xFFF8FAFD),
+      body: Column(
+        children: [
+          // Stats Card (only show when not loading and not overdue filter)
+          if (!_loading && _filter != 'overdue' && _items.isNotEmpty)
+            _buildStatsCard(),
+
+          // Filter chips
+          if (!_loading && _items.isNotEmpty)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    _buildFilterChip('All', 'all', Icons.all_inclusive),
+                    const SizedBox(width: 8),
+                    _buildFilterChip('Pending', 'pending', Icons.pending),
+                    const SizedBox(width: 8),
+                    _buildFilterChip('Due', 'due', Icons.schedule),
+                    const SizedBox(width: 8),
+                    _buildFilterChip('Overdue', 'overdue', Icons.warning),
+                  ],
+                ),
+              ),
+            ),
+
+          // Main content
+          Expanded(
+            child: _loading
+                ? Center(
+              child: CircularProgressIndicator(
+                color: Colors.deepPurple.shade600,
+                strokeWidth: 2.5,
+              ),
+            )
+                : _error != null
+                ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.error_outline,
+                    size: 60,
+                    color: Colors.red.shade400,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Error Loading Data',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.grey.shade800,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _error!,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  ElevatedButton(
+                    onPressed: _load,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.deepPurple.shade600,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text(
+                      'Retry',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ),
+                ],
+              ),
+            )
+                : _items.isEmpty
+                ? _buildEmptyState()
+                : RefreshIndicator(
+              onRefresh: _load,
+              color: Colors.deepPurple.shade600,
+              backgroundColor: Colors.white,
+              child: ListView(
+                padding: const EdgeInsets.only(bottom: 24),
+                physics: const AlwaysScrollableScrollPhysics(),
+                children: [
+                  if (_filter != 'overdue')
+                    const SizedBox(height: 8),
+                  ..._items.map((player) => _buildPlayerCard(player)),
+                  const SizedBox(height: 80), // Space for scroll
+                ],
+              ),
+            ),
+          ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-          ? Center(child: Text('Error: $_error'))
-          : _items.isEmpty
-          ? const Center(child: Text('No players found'))
-          : RefreshIndicator(
-        onRefresh: _load,
-        child: ListView.builder(
-          padding: const EdgeInsets.only(top: 8, bottom: 24),
-          itemCount: _items.length,
-          itemBuilder: (ctx, i) => _buildRow(_items[i]),
+      floatingActionButton: _filter != 'overdue'
+          ? FloatingActionButton.extended(
+        onPressed: _pickMonth,
+        backgroundColor: Colors.deepPurple.shade600,
+        foregroundColor: Colors.white,
+        elevation: 4,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
         ),
-      ),
+        icon: const Icon(Icons.calendar_today, size: 24),
+        label: const Text(
+          'Change Month',
+          style: TextStyle(fontWeight: FontWeight.w600),
+        ),
+      )
+          : null,
     );
   }
 }

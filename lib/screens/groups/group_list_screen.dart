@@ -215,10 +215,6 @@ class _GroupListScreenState extends State<GroupListScreen> {
                 group.name,
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
-              subtitle: Text(
-                'ID: ${group.id}',
-                style: const TextStyle(fontSize: 12),
-              ),
               trailing: IconButton(
                 icon: const Icon(Icons.delete_outline, color: Colors.red),
                 onPressed: () => _deleteGroup(i),
