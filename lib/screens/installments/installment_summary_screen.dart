@@ -65,9 +65,9 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
     if (s == null) return '';
     return s.toUpperCase().replaceAll('_', ' ').trim();
   }
-
   List<PlayerInstallmentSummary> _applyFilter(List<PlayerInstallmentSummary> list) {
     final now = DateTime.now();
+    final startOfToday = DateTime(now.year, now.month, now.day);
 
     switch (_filter) {
       case 'pending':
@@ -77,15 +77,13 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
         }).toList();
 
       case 'due':
-      // Shows Pending OR Partial for the selected month
         return list.where((p) {
           final s = _normStatus(p.status);
           return s == 'PENDING' || s == 'PARTIALLY PAID';
         }).toList();
 
       case 'overdue':
-      // Logic for Global Overdue
-        final startOfToday = DateTime(now.year, now.month, now.day);
+      // ENHANCED: Include ALL past unpaid installments
         return list.where((p) {
           final s = _normStatus(p.status);
           final isPaid = s == 'PAID';
@@ -98,7 +96,6 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
         return list;
     }
   }
-
   // --- RESTORED: Month Picker Logic ---
   // ... inside _InstallmentSummaryScreenState class ...
 

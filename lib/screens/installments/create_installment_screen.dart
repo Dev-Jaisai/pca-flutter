@@ -4,7 +4,7 @@ import 'package:intl/intl.dart';
 import '../../models/player.dart';
 import '../../models/fee_structure.dart';
 import '../../services/api_service.dart';
-import '../../utils/event_bus.dart'; // <-- added import
+import '../../utils/event_bus.dart';
 
 class CreateInstallmentScreen extends StatefulWidget {
   final Player player;
@@ -30,7 +30,7 @@ class _CreateInstallmentScreenState extends State<CreateInstallmentScreen> {
   void initState() {
     super.initState();
     final now = DateTime.now();
-    // Prefill month/year with current month/year for convenience
+    // Prefill month/year with current month/year
     _monthCtl.text = now.month.toString();
     _yearCtl.text = now.year.toString();
     _loadEffectiveFee();
@@ -65,7 +65,6 @@ class _CreateInstallmentScreenState extends State<CreateInstallmentScreen> {
       }
     } catch (e) {
       _feeError = 'Failed to load group fee';
-      // keep _effectiveFee null
     } finally {
       if (mounted) {
         setState(() {
@@ -99,7 +98,6 @@ class _CreateInstallmentScreenState extends State<CreateInstallmentScreen> {
 
     setState(() => _submitting = true);
     try {
-      // Use existing ApiService.createInstallment (matches your current code)
       await ApiService.createInstallment(
         playerId: widget.player.id,
         periodMonth: month,
@@ -108,13 +106,16 @@ class _CreateInstallmentScreenState extends State<CreateInstallmentScreen> {
         amount: amount,
       );
 
-      // Fire event so Dashboard (and other parts) refresh
       EventBus().fire(PlayerEvent('installment_created'));
 
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Installment created')));
-      Navigator.of(context).pop(true);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Installment created')));
+        Navigator.of(context).pop(true);
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Create failed: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Create failed: $e')));
+      }
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -125,102 +126,191 @@ class _CreateInstallmentScreenState extends State<CreateInstallmentScreen> {
     final df = DateFormat('dd MMM yyyy');
 
     return Scaffold(
-      appBar: AppBar(title: Text('${widget.player.name} — Create Installment')),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: _submitting
-            ? const Center(child: CircularProgressIndicator())
-            : SingleChildScrollView(
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Player: ${widget.player.name}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 12),
-
-                // Month & Year
-                Row(
+      backgroundColor: const Color(0xFFF5F7FA),
+      appBar: AppBar(
+        title: const Text('New Installment'),
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black87,
+        elevation: 0,
+      ),
+      body: _submitting
+          ? const Center(child: CircularProgressIndicator())
+          : SingleChildScrollView(
+        padding: const EdgeInsets.all(20.0),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // --- 1. PLAYER INFO CARD ---
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.deepPurple.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.deepPurple.shade100),
+                ),
+                child: Row(
                   children: [
-                    Expanded(
-                      child: TextFormField(
-                        controller: _monthCtl,
-                        decoration: const InputDecoration(labelText: 'Month (1-12)'),
-                        keyboardType: TextInputType.number,
-                        validator: (v) {
-                          final val = int.tryParse(v ?? '');
-                          if (val == null || val < 1 || val > 12) return 'Enter month 1-12';
-                          return null;
-                        },
-                      ),
+                    CircleAvatar(
+                      radius: 24,
+                      backgroundColor: Colors.deepPurple.shade100,
+                      child: Icon(Icons.person, color: Colors.deepPurple.shade700),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 16),
                     Expanded(
-                      child: TextFormField(
-                        controller: _yearCtl,
-                        decoration: const InputDecoration(labelText: 'Year (e.g., 2025)'),
-                        keyboardType: TextInputType.number,
-                        validator: (v) {
-                          final val = int.tryParse(v ?? '');
-                          if (val == null || val < 2000) return 'Enter valid year';
-                          return null;
-                        },
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            "Creating Installment For:",
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.deepPurple,
+                                fontWeight: FontWeight.w500
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            widget.player.name,
+                            style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black87
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
                 ),
+              ),
+              const SizedBox(height: 24),
 
-                const SizedBox(height: 16),
-
-                // Amount field (prefilled with group fee if available)
-                TextFormField(
-                  controller: _amountCtl,
-                  decoration: InputDecoration(
-                    labelText: 'Amount (optional, leave blank for group fee)',
-                    helperText: _loadingFee
-                        ? 'Loading group fee…'
-                        : _feeError != null
-                        ? _feeError
-                        : _effectiveFee != null
-                        ? 'Group fee: ₹ ${_effectiveFee!.monthlyFee.toStringAsFixed(2)} (editable)'
-                        : 'No group fee set for this group',
-                  ),
-                  keyboardType: TextInputType.numberWithOptions(decimal: true),
-                  validator: (v) {
-                    if (v == null || v.trim().isEmpty) return null; // allow empty -> backend will use group fee
-                    final n = double.tryParse(v);
-                    if (n == null || n <= 0) return 'Enter a valid amount';
-                    return null;
-                  },
-                ),
-
-                const SizedBox(height: 16),
-
-                // Due date
-                GestureDetector(
-                  onTap: _pickDate,
-                  child: AbsorbPointer(
+              // --- 2. PERIOD INPUTS ---
+              const Text("Installment Period", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
                     child: TextFormField(
+                      controller: _monthCtl,
                       decoration: InputDecoration(
-                        labelText: 'Due Date',
-                        hintText: _dueDate == null ? 'Pick due date' : df.format(_dueDate!),
-                        suffixIcon: const Icon(Icons.calendar_today),
+                        labelText: 'Month',
+                        hintText: '1-12',
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        filled: true,
+                        fillColor: Colors.white,
                       ),
+                      keyboardType: TextInputType.number,
+                      validator: (v) {
+                        final val = int.tryParse(v ?? '');
+                        if (val == null || val < 1 || val > 12) return 'Invalid Month';
+                        return null;
+                      },
                     ),
                   ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _yearCtl,
+                      decoration: InputDecoration(
+                        labelText: 'Year',
+                        hintText: 'e.g. 2025',
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        filled: true,
+                        fillColor: Colors.white,
+                      ),
+                      keyboardType: TextInputType.number,
+                      validator: (v) {
+                        final val = int.tryParse(v ?? '');
+                        if (val == null || val < 2000) return 'Invalid Year';
+                        return null;
+                      },
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 24),
+
+              // --- 3. AMOUNT ---
+              const Text("Payment Details", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _amountCtl,
+                decoration: InputDecoration(
+                  labelText: 'Installment Amount',
+                  prefixText: '₹ ',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                  filled: true,
+                  fillColor: Colors.white,
+                  suffixIcon: _loadingFee
+                      ? const Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator(strokeWidth: 2))
+                      : null,
+                  helperText: _loadingFee
+                      ? 'Fetching group fee...'
+                      : _effectiveFee != null
+                      ? 'Default Group Fee: ₹${_effectiveFee!.monthlyFee}'
+                      : 'No default fee found',
                 ),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                validator: (v) {
+                  if (v == null || v.trim().isEmpty) return null; // Backend uses default
+                  final n = double.tryParse(v);
+                  if (n == null || n <= 0) return 'Enter valid amount';
+                  return null;
+                },
+              ),
 
-                const SizedBox(height: 24),
+              const SizedBox(height: 16),
 
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _submitting ? null : _submit,
-                    child: const Text('Create Installment'),
+              // --- 4. DUE DATE ---
+              InkWell(
+                onTap: _pickDate,
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    border: Border.all(color: Colors.grey.shade400),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.calendar_month, color: Colors.deepPurple),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          _dueDate == null ? 'Select Due Date *' : df.format(_dueDate!),
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: _dueDate == null ? Colors.grey.shade600 : Colors.black87,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
-            ),
+              ),
+
+              const SizedBox(height: 32),
+
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: ElevatedButton(
+                  onPressed: _submitting ? null : _submit,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.deepPurple,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    elevation: 2,
+                  ),
+                  child: const Text('Create Installment', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
           ),
         ),
       ),

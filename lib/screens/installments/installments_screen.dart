@@ -1,16 +1,21 @@
-// lib/screens/installments/installments_screen.dart
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../models/player.dart';
 import '../../models/installment.dart';
 import '../../services/api_service.dart';
 import '../payments/payment_list_screen.dart';
-import 'create_installment_screen.dart';
 import 'package:textewidget/screens/payments/record_payment_screen.dart';
+import 'create_installment_screen.dart';
 
 class InstallmentsScreen extends StatefulWidget {
   final Player player;
-  const InstallmentsScreen({super.key, required this.player});
+  final String? initialFilter;
+
+  const InstallmentsScreen({
+    super.key,
+    required this.player,
+    this.initialFilter,
+  });
 
   @override
   State<InstallmentsScreen> createState() => _InstallmentsScreenState();
@@ -18,6 +23,7 @@ class InstallmentsScreen extends StatefulWidget {
 
 class _InstallmentsScreenState extends State<InstallmentsScreen> {
   late Future<List<Installment>> _futureInstallments;
+  final df = DateFormat('dd MMM yyyy');
 
   @override
   void initState() {
@@ -41,17 +47,39 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final df = DateFormat('dd MMM yyyy');
-    final bg = const Color(0xFFFBF8FF);
-    final accent = const Color(0xFF9B6CFF);
+    const bg = Color(0xFFF5F7FA);
 
     return Scaffold(
       backgroundColor: bg,
       appBar: AppBar(
-        title: Text('${widget.player.name} — Installments'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              widget.player.name,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const Text(
+              'Installment History',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ],
+        ),
         elevation: 0,
-        backgroundColor: Colors.transparent,
+        backgroundColor: Colors.white,
         foregroundColor: Colors.black87,
+        centerTitle: false,
+        // --- ADDED BUTTON HERE (Top Right) ---
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8.0),
+            child: IconButton(
+              onPressed: _openCreate,
+              icon: const Icon(Icons.add_circle_outline, color: Colors.deepPurple, size: 28),
+              tooltip: 'Create Installment',
+            ),
+          ),
+        ],
       ),
       body: FutureBuilder<List<Installment>>(
         future: _futureInstallments,
@@ -68,10 +96,20 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
             return Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
-                children: const [
-                  Icon(Icons.calendar_month_outlined, size: 56, color: Colors.black26),
-                  SizedBox(height: 12),
-                  Text('No installments found', style: TextStyle(color: Colors.black54)),
+                children: [
+                  Icon(Icons.history_edu, size: 64, color: Colors.grey.shade300),
+                  const SizedBox(height: 16),
+                  Text(
+                    'No installments recorded yet.',
+                    style: TextStyle(color: Colors.grey.shade600, fontSize: 16),
+                  ),
+                  const SizedBox(height: 24),
+                  // Optional: Call to action button for empty state
+                  OutlinedButton.icon(
+                    onPressed: _openCreate,
+                    icon: const Icon(Icons.add),
+                    label: const Text("Create First Installment"),
+                  )
                 ],
               ),
             );
@@ -82,184 +120,216 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
               _load();
               await _futureInstallments;
             },
-            color: accent,
-            child: ListView.separated(
-              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
               itemCount: list.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 10),
               itemBuilder: (context, i) {
-                final it = list[i];
-
-                // compute whether fully paid
-                final double remaining = (it.remainingAmount ?? it.amount ?? 0.0);
-                final bool isPaid = remaining <= 0.0;
-
-                // friendly status text
-                final statusText = it.status ?? 'N/A';
-                final period = '${it.periodMonth ?? '-'} / ${it.periodYear ?? '-'}';
-
-                // Status Colors
-                Color statusColor = Colors.grey;
-                if(statusText == 'OVERDUE') statusColor = Colors.red;
-                else if(statusText == 'PENDING') statusColor = Colors.blue;
-                else if(statusText == 'PARTIALLY_PAID') statusColor = Colors.orange;
-                else if(statusText == 'PAID') statusColor = Colors.green;
-
-                return Material(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(14),
-                  elevation: 6,
-                  shadowColor: Colors.black12,
-                  child: Container(
-                    padding: const EdgeInsets.all(14),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Header Row: Period, Status
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              period,
-                              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
-                            ),
-                            // Status Badge
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: statusColor.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: statusColor.withOpacity(0.5)),
-                              ),
-                              child: Text(
-                                statusText.replaceAll('_', ' '),
-                                style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 11),
-                              ),
-                            ),
-                          ],
-                        ),
-
-                        const Divider(height: 20),
-
-                        // amounts and due date
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('Amount: ${it.amount?.toStringAsFixed(2) ?? '-'}', style: const TextStyle(fontSize: 13)),
-                                  const SizedBox(height: 6),
-                                  Text('Paid: ${it.paidAmount?.toStringAsFixed(2) ?? '0.00'}', style: const TextStyle(fontSize: 13)),
-                                ],
-                              ),
-                            ),
-                            if (it.dueDate != null)
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                children: [
-                                  const Text('Due Date', style: TextStyle(fontSize: 12, color: Colors.black54)),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                      df.format(it.dueDate!),
-                                      style: TextStyle(
-                                          fontWeight: FontWeight.w700,
-                                          color: (statusText == 'OVERDUE' && !isPaid) ? Colors.red : Colors.black87
-                                      )
-                                  ),
-                                ],
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-
-                        // action row
-                        Row(
-                          children: [
-                            Expanded(
-                              child: OutlinedButton.icon(
-                                onPressed: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) => PaymentsListScreen(
-                                        installmentId: it.id,
-                                        remainingAmount: remaining,
-                                      ),
-                                    ),
-                                  );
-                                },
-                                icon: const Icon(Icons.receipt_long, size: 18),
-                                label: const Text('Payments'),
-                                style: OutlinedButton.styleFrom(
-                                  side: BorderSide(color: Colors.grey.shade200),
-                                  foregroundColor: accent,
-                                  padding: const EdgeInsets.symmetric(vertical: 12),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            SizedBox(
-                              width: 140,
-                              child: ElevatedButton.icon(
-                                onPressed: isPaid
-                                    ? null
-                                    : () async {
-                                  final result = await Navigator.push<bool>(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) => RecordPaymentScreen(
-                                        installmentId: it.id,
-                                        remainingAmount: remaining,
-                                      ),
-                                    ),
-                                  );
-                                  if (result == true) _load();
-                                },
-                                icon: const Icon(Icons.add_card, size: 18),
-                                label: const Text('Record', style: TextStyle(fontWeight: FontWeight.w600)),
-                                style: ButtonStyle(
-                                  backgroundColor: MaterialStateProperty.resolveWith<Color?>((states) {
-                                    if (states.contains(MaterialState.disabled)) return Colors.grey.shade200;
-                                    return accent;
-                                  }),
-                                  foregroundColor: MaterialStateProperty.resolveWith<Color?>((states) {
-                                    if (states.contains(MaterialState.disabled)) return Colors.grey.shade500;
-                                    return Colors.white;
-                                  }),
-                                  elevation: MaterialStateProperty.resolveWith<double?>((states) {
-                                    if (states.contains(MaterialState.disabled)) return 0.0;
-                                    return 6.0;
-                                  }),
-                                  padding: MaterialStateProperty.all(const EdgeInsets.symmetric(vertical: 12)),
-                                  shape: MaterialStateProperty.all(RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                );
+                return _buildInstallmentCard(list[i]);
               },
             ),
           );
         },
       ),
-      floatingActionButton: Container(
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(colors: [Color(0xFFBFA7FF), Color(0xFF9B6CFF)]),
-          borderRadius: BorderRadius.circular(30),
-          boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 10, offset: Offset(0, 4))],
-        ),
-        child: FloatingActionButton.extended(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          onPressed: _openCreate,
-          icon: const Icon(Icons.add, color: Colors.white),
-          label: const Text('Create Installment', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+    );
+  }
+
+  Widget _buildInstallmentCard(Installment it) {
+    final double total = it.amount ?? 0.0;
+    final double paid = it.paidAmount ?? 0.0;
+    final double remaining = total - paid;
+    final bool isPaid = remaining <= 0;
+    final bool isOverdue = !isPaid && it.dueDate != null && it.dueDate!.isBefore(DateTime.now());
+
+    // Status Determination
+    String statusText = (it.status ?? 'PENDING').replaceAll('_', ' ');
+    Color statusColor = Colors.blue;
+    Color statusBg = Colors.blue.shade50;
+
+    if (isPaid) {
+      statusText = "PAID";
+      statusColor = Colors.green;
+      statusBg = Colors.green.shade50;
+    } else if (isOverdue) {
+      statusText = "OVERDUE";
+      statusColor = Colors.red;
+      statusBg = Colors.red.shade50;
+    } else if (paid > 0) {
+      statusText = "PARTIAL";
+      statusColor = Colors.orange;
+      statusBg = Colors.orange.shade50;
+    }
+
+    final periodLabel = '${it.periodMonth}/${it.periodYear}';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          )
+        ],
+        // Left accent border based on status
+        border: Border(left: BorderSide(color: statusColor, width: 4)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // --- Header: Month & Status Badge ---
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  periodLabel,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: statusBg,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: statusColor.withOpacity(0.3)),
+                  ),
+                  child: Text(
+                    statusText,
+                    style: TextStyle(
+                      color: statusColor,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 16),
+
+            // --- Amount Details ---
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Total Amount', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                      const SizedBox(height: 4),
+                      Text(
+                        '₹${total.toStringAsFixed(0)}',
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Paid', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                      const SizedBox(height: 4),
+                      Text(
+                        '₹${paid.toStringAsFixed(0)}',
+                        style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.green.shade700
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      const Text('Due Date', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                      const SizedBox(height: 4),
+                      Text(
+                        it.dueDate != null ? df.format(it.dueDate!) : '—',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                          color: isOverdue ? Colors.red : Colors.black87,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 20),
+
+            // --- Action Buttons ---
+            Row(
+              children: [
+                // 1. View History Button
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => PaymentsListScreen(
+                            installmentId: it.id,
+                            remainingAmount: remaining,
+                          ),
+                        ),
+                      );
+                    },
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.black87,
+                      side: BorderSide(color: Colors.grey.shade300),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    icon: const Icon(Icons.history, size: 18, color: Colors.grey),
+                    label: const Text('Payments'),
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                // 2. Record Payment Button (Primary)
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: isPaid
+                        ? null // Disabled if fully paid
+                        : () async {
+                      final result = await Navigator.push<bool>(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => RecordPaymentScreen(
+                            installmentId: it.id,
+                            remainingAmount: remaining,
+                          ),
+                        ),
+                      );
+                      if (result == true) _load();
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.deepPurple,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    icon: const Icon(Icons.add_card, size: 18),
+                    label: const Text('Record'),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
