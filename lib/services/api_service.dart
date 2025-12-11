@@ -422,4 +422,35 @@ class ApiService {
       throw Exception('Failed to extend date: ${response.body}');
     }
   }
+  static Future<List<PlayerInstallmentSummary>> fetchOverdueSummary() async {
+    final url = Uri.parse('$baseUrl/api/installments/overdue-summary');
+    final response = await http.get(url);
+
+    if (response.statusCode == 200) {
+      final List<dynamic> data = json.decode(response.body);
+      return data
+          .map((e) => PlayerInstallmentSummary.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } else {
+      throw Exception('Failed to load overdue summary: ${response.statusCode} - ${response.body}');
+    }
+  }
+  static Future<void> payOverdue({required int playerId, required double amount}) async {
+    final url = Uri.parse('$baseUrl/api/payments/pay-overdue');
+    final body = {
+      'playerId': playerId,
+      'amount': amount,
+      'paymentMethod': 'Cash' // Or add a dropdown in dialog
+    };
+
+    final response = await http.post(
+      url,
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode(body),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to record overdue payment: ${response.body}');
+    }
+  }
 }

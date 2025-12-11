@@ -1,7 +1,10 @@
+// lib/widgets/dashboard_stats.dart
 import 'dart:async';
-import 'package:flutter/foundation.dart'; // For compute
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../models/player_installment_summary.dart';
+import '../screens/home/home_screen.dart';
+import '../screens/installments/overdue_players_screen.dart';
 import '../services/api_service.dart';
 import '../services/data_manager.dart';
 import '../utils/event_bus.dart';
@@ -13,12 +16,16 @@ class DashboardStats extends StatefulWidget {
   DashboardStatsState createState() => DashboardStatsState();
 }
 
-class DashboardStatsState extends State<DashboardStats> with TickerProviderStateMixin {
+class DashboardStatsState extends State<DashboardStats>
+    with TickerProviderStateMixin {
   int _totalPlayers = 0;
   int _currentMonthDue = 0;
-  int _upcomingCount = 0; // Renamed from pending
-  int _overdue = 0;
+  int _upcomingCount = 0;
+  int _overdueCount = 0; // Changed from _overdue
+  double _overdueAmount = 0.0; // NEW: Store overdue amount
   bool _loading = true;
+  int _overduePlayers = 0; // Renamed from _overdueCount to be clear
+
   late StreamSubscription<PlayerEvent> _playerEventsSubscription;
 
   final List<bool> _visible = [false, false, false, false];
@@ -29,19 +36,28 @@ class DashboardStatsState extends State<DashboardStats> with TickerProviderState
   void initState() {
     super.initState();
     _numAnimController = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 800));
-    _numAnim = CurvedAnimation(parent: _numAnimController, curve: Curves.easeOut);
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
+    _numAnim = CurvedAnimation(
+      parent: _numAnimController,
+      curve: Curves.easeOut,
+    );
 
     _loadFromCache();
     _loadStats();
-
     _playerEventsSubscription = EventBus().stream.listen((event) {
       if ([
-        'added', 'deleted', 'updated',
-        'installment_created', 'installment_deleted', 'payment_recorded',
-        'installment_updated'
+        'added',
+        'deleted',
+        'updated',
+        'installment_created',
+        'installment_deleted',
+        'payment_recorded',
+        'installment_updated',
+        'overdue_paid', // ADD THIS NEW EVENT
       ].contains(event.action)) {
-        _loadStats();
+        _loadStats(); // This will refresh the dashboard
       }
     });
   }
@@ -64,7 +80,8 @@ class DashboardStatsState extends State<DashboardStats> with TickerProviderState
           _totalPlayers = cachedPlayers?.length ?? 0;
           _currentMonthDue = stats['due']!;
           _upcomingCount = stats['upcoming']!;
-          _overdue = stats['overdue']!;
+          _overduePlayers = stats['overduePlayers']!; // Updated
+          _overdueAmount = stats['overdueAmount']!;
           _loading = false;
         });
         _animateValues();
@@ -90,64 +107,114 @@ class DashboardStatsState extends State<DashboardStats> with TickerProviderState
           _totalPlayers = players.length;
           _currentMonthDue = stats['due']!;
           _upcomingCount = stats['upcoming']!;
-          _overdue = stats['overdue']!;
+          _overduePlayers = stats['overduePlayers']!; // Updated
+          _overdueAmount = stats['overdueAmount']!;
           _loading = false;
         });
         _animateValues();
       }
     } catch (e) {
       debugPrint('Error loading stats: $e');
-      if (mounted && _totalPlayers == 0) setState(() => _loading = false);
+      if (mounted && _totalPlayers == 0) {
+        setState(() => _loading = false);
+      }
     }
+  }
+
+// ENHANCED OVERDUE CALCULATION - COUNT PLAYERS, NOT INSTALLMENTS
+  static Map<String, dynamic> _calculateStats(
+      List<PlayerInstallmentSummary> rows) {
+    int dueThisMonthCount = 0;
+    int upcomingCount = 0;
+
+    // Track unique players for each category
+    Set<int> playersWithThisMonthDue = {};
+    Set<int> playersWithUpcoming = {};
+    Set<int> playersWithOverdue = {};
+
+    double overdueAmount = 0.0;
+
+    final now = DateTime.now();
+    final startOfToday = DateTime(now.year, now.month, now.day);
+
+    // Group by player first for better calculation
+    final Map<int, List<PlayerInstallmentSummary>> playersMap = {};
+    for (final r in rows) {
+      if (r.playerId != null) {
+        playersMap.putIfAbsent(r.playerId!, () => []).add(r);
+      }
+    }
+
+    // Calculate stats per player
+    playersMap.forEach((playerId, playerRows) {
+      bool playerHasThisMonthDue = false;
+      bool playerHasUpcoming = false;
+      bool playerHasOverdue = false;
+      double playerOverdueAmount = 0.0;
+
+      for (final r in playerRows) {
+        final st = (r.status ?? '').toUpperCase().replaceAll('_', ' ').trim();
+        final bool isPaid = st == 'PAID';
+
+        if (r.dueDate == null) continue;
+
+        // 1. OVERDUE: ALL PAST UNPAID INSTALLMENTS
+        if (r.dueDate!.isBefore(startOfToday) && !isPaid) {
+          playerHasOverdue = true;
+
+          final totalAmount = r.installmentAmount ?? 0.0;
+          final paidAmount = r.totalPaid ?? 0.0;
+          final remaining = totalAmount - paidAmount;
+
+          if (remaining > 0) {
+            playerOverdueAmount += remaining;
+          }
+        }
+
+        // 2. THIS MONTH DUE: Current month installments that are not paid
+        if (r.dueDate!.year == now.year &&
+            r.dueDate!.month == now.month &&
+            !isPaid) {
+          playerHasThisMonthDue = true;
+        }
+
+        // 3. UPCOMING: Next month installments that are not paid
+        final nextMonthDate = DateTime(now.year, now.month + 1, 1);
+        if (r.dueDate!.year == nextMonthDate.year &&
+            r.dueDate!.month == nextMonthDate.month &&
+            !isPaid) {
+          playerHasUpcoming = true;
+        }
+      }
+
+      if (playerHasOverdue) {
+        playersWithOverdue.add(playerId);
+        overdueAmount += playerOverdueAmount;
+      }
+      if (playerHasThisMonthDue) {
+        playersWithThisMonthDue.add(playerId);
+      }
+      if (playerHasUpcoming) {
+        playersWithUpcoming.add(playerId);
+      }
+    });
+
+    return {
+      'due': playersWithThisMonthDue.length,
+      // Players with due this month
+      'upcoming': playersWithUpcoming.length,
+      // Players with upcoming
+      'overduePlayers': playersWithOverdue.length,
+      // Players with overdue (NOT installments)
+      'overdueAmount': overdueAmount,
+      // Total overdue amount
+    };
   }
 
   void _animateValues() {
     _numAnimController.reset();
     _numAnimController.forward();
     _playStaggered();
-  }
-
-  // --- UPDATED LOGIC FOR UPCOMING ---
-  static Map<String, int> _calculateStats(List<PlayerInstallmentSummary> rows) {
-    int dueThisMonthCount = 0;
-    int upcomingCount = 0;
-    int overdueCount = 0;
-
-    final now = DateTime.now();
-    final startOfToday = DateTime(now.year, now.month, now.day);
-
-    // Determine Next Month
-    final nextMonthDate = DateTime(now.year, now.month + 1, 1);
-    final nextMonth = nextMonthDate.month;
-    final nextYear = nextMonthDate.year;
-
-    for (final r in rows) {
-      final st = (r.status ?? '').toUpperCase().replaceAll('_', ' ').trim();
-      final bool isPaid = st == 'PAID';
-
-      if (r.dueDate == null) continue;
-
-      // 1. OVERDUE: Date passed AND not paid
-      if (!isPaid && r.dueDate!.isBefore(startOfToday)) {
-        overdueCount++;
-      }
-
-      // 2. THIS MONTH DUE: Current Month AND not paid
-      if (r.dueDate!.year == now.year && r.dueDate!.month == now.month) {
-        if (!isPaid) dueThisMonthCount++;
-      }
-
-      // 3. UPCOMING (Next Month): Next Month AND not paid
-      if (r.dueDate!.year == nextYear && r.dueDate!.month == nextMonth) {
-        if (!isPaid) upcomingCount++;
-      }
-    }
-
-    return {
-      'due': dueThisMonthCount,
-      'upcoming': upcomingCount,
-      'overdue': overdueCount,
-    };
   }
 
   void _playStaggered() {
@@ -169,9 +236,21 @@ class DashboardStatsState extends State<DashboardStats> with TickerProviderState
     );
   }
 
+  Widget _animatedAmount(double value, TextStyle style) {
+    return AnimatedBuilder(
+      animation: _numAnim,
+      builder: (context, child) {
+        final v = (_numAnim.value * value).round();
+        return Text('₹$v', style: style);
+      },
+    );
+  }
+
+// FIXED CODE for the _statCard widget:
   Widget _statCard({
     required String title,
     required int value,
+    required double? amountValue,
     required IconData icon,
     required List<Color> gradient,
     required Color accent,
@@ -186,12 +265,17 @@ class DashboardStatsState extends State<DashboardStats> with TickerProviderState
         child: Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
-                colors: gradient,
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight),
+              colors: gradient,
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
             borderRadius: BorderRadius.circular(16),
             boxShadow: const [
-              BoxShadow(color: Color(0x22000000), blurRadius: 10, offset: Offset(0, 6)),
+              BoxShadow(
+                color: Color(0x22000000),
+                blurRadius: 10,
+                offset: Offset(0, 6),
+              ),
             ],
           ),
           child: Material(
@@ -200,7 +284,8 @@ class DashboardStatsState extends State<DashboardStats> with TickerProviderState
               onTap: onTap,
               borderRadius: BorderRadius.circular(16),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 child: Row(
                   children: [
                     Container(
@@ -210,7 +295,11 @@ class DashboardStatsState extends State<DashboardStats> with TickerProviderState
                         color: Colors.white24,
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: const [
-                          BoxShadow(color: Color(0x11000000), blurRadius: 6, offset: Offset(0, 4))
+                          BoxShadow(
+                            color: Color(0x11000000),
+                            blurRadius: 6,
+                            offset: Offset(0, 4),
+                          ),
                         ],
                       ),
                       child: Icon(icon, size: 26, color: accent),
@@ -222,21 +311,68 @@ class DashboardStatsState extends State<DashboardStats> with TickerProviderState
                         mainAxisAlignment: MainAxisAlignment.center,
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          // Count with animation
                           FittedBox(
                             fit: BoxFit.scaleDown,
                             alignment: Alignment.centerLeft,
-                            child: _animatedNumber(value, const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+                            child: _animatedNumber(
+                              value,
+                              const TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                            ),
                           ),
+
+                          // Amount display logic - FIXED SYNTAX
+                          if (amountValue != null)
+                            FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: amountValue > 0
+                                  ? _animatedAmount(
+                                      amountValue,
+                                      const TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.white70,
+                                      ),
+                                    )
+                                  : Text(
+                                      '₹0',
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        color: Colors.white70,
+                                      ),
+                                    ),
+                            ),
+
                           const SizedBox(height: 2),
-                          Text(title, style: const TextStyle(fontSize: 11, color: Colors.white70), maxLines: 1, overflow: TextOverflow.ellipsis),
+                          Text(
+                            title,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Colors.white70,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ],
                       ),
                     ),
                     Container(
                       width: 28,
                       height: 28,
-                      decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(8)),
-                      child: const Icon(Icons.chevron_right, size: 20, color: Colors.white70),
+                      decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(
+                        Icons.chevron_right,
+                        size: 20,
+                        color: Colors.white70,
+                      ),
                     ),
                   ],
                 ),
@@ -251,56 +387,72 @@ class DashboardStatsState extends State<DashboardStats> with TickerProviderState
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const SizedBox(height: 160, child: Center(child: CircularProgressIndicator()));
+      return const SizedBox(
+        height: 160,
+        child: Center(child: CircularProgressIndicator()),
+      );
     }
+
+    final now = DateTime.now();
+    final currentMonth = '${now.year}-${now.month.toString().padLeft(2, '0')}';
 
     final configs = [
       {
         'title': 'Total Players',
         'value': _totalPlayers,
+        'amount': null,
         'icon': Icons.people,
         'gradient': [Colors.blue.shade400, Colors.blue.shade200],
         'accent': Colors.blue.shade50,
-        'onTap': () => Navigator.pushNamed(context, '/all-installments'),
+        'onTap': () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const HomeScreen()),
+        ),
       },
+
       {
         'title': 'This Month Due',
         'value': _currentMonthDue,
+        'amount': null,
         'icon': Icons.calendar_month,
         'gradient': [Colors.orange.shade400, Colors.orange.shade200],
         'accent': Colors.orange.shade50,
         'onTap': () => Navigator.pushNamed(
-            context,
-            '/all-installments',
-            arguments: {'filter': 'Due (Month)'}
-        ),
+              context,
+              '/all-installments',
+              arguments: {'filter': 'Due (Month)'},
+            ),
       },
-      // --- UPCOMING (Next Month) ---
       {
         'title': 'Upcoming',
         'value': _upcomingCount,
-        'icon': Icons.next_plan, // New Icon
-        'gradient': [Colors.teal.shade400, Colors.teal.shade200], // New Color
+        'amount': null,
+        'icon': Icons.next_plan,
+        'gradient': [Colors.teal.shade400, Colors.teal.shade200],
         'accent': Colors.teal.shade50,
-        'onTap': _upcomingCount > 0
-            ? () => Navigator.pushNamed(
-            context,
-            '/all-installments',
-            arguments: {'filter': 'Upcoming'} // New Filter
-        )
-            : null,
+        'onTap': () => Navigator.pushNamed(
+          context,
+          '/all-installments',
+          arguments: {'filter': 'Upcoming'},
+        ),
+
+
       },
+      // In the build method's configs list:
+      // In DashboardStats widget, update the overdue card:
       {
         'title': 'Overdue',
-        'value': _overdue,
+        'value': _overduePlayers,
+        'amount': _overdueAmount,
         'icon': Icons.warning,
         'gradient': [Colors.purple.shade400, Colors.purple.shade200],
         'accent': Colors.purple.shade50,
-        'onTap': _overdue > 0
-            ? () => Navigator.pushNamed(
-            context,
-            '/all-installments',
-            arguments: {'filter': 'Overdue'}
+        'onTap': _overduePlayers > 0
+            ? () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => OverduePlayersScreen(),
+          ),
         )
             : null,
       },
@@ -317,7 +469,10 @@ class DashboardStatsState extends State<DashboardStats> with TickerProviderState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Quick Stats', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        const Text(
+          'Quick Stats',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
         const SizedBox(height: 12),
         SizedBox(
           height: gridHeight,
@@ -337,6 +492,7 @@ class DashboardStatsState extends State<DashboardStats> with TickerProviderState
               return _statCard(
                 title: c['title'] as String,
                 value: c['value'] as int,
+                amountValue: c['amount'] as double?,
                 icon: c['icon'] as IconData,
                 gradient: c['gradient'] as List<Color>,
                 accent: c['accent'] as Color,

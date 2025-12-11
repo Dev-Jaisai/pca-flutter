@@ -8,6 +8,29 @@ import '../../utils/event_bus.dart';
 import '../payments/payment_list_screen.dart';
 import 'installments_screen.dart';
 
+// Helper class to hold grouped data
+class PlayerConsolidatedSummary {
+  final int playerId;
+  final String playerName;
+  final String groupName;
+  final String phone;
+  double totalAmount;
+  double totalPaid;
+  double totalRemaining;
+  List<PlayerInstallmentSummary> installments;
+
+  PlayerConsolidatedSummary({
+    required this.playerId,
+    required this.playerName,
+    required this.groupName,
+    required this.phone,
+    this.totalAmount = 0.0,
+    this.totalPaid = 0.0,
+    this.totalRemaining = 0.0,
+    required this.installments,
+  });
+}
+
 class AllInstallmentsScreen extends StatefulWidget {
   final String? initialFilter;
   const AllInstallmentsScreen({super.key, this.initialFilter});
@@ -23,6 +46,7 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
   String _currentFilter = 'All';
   DateTime _selectedMonth = DateTime.now();
   final df = DateFormat('dd MMM yyyy');
+  final chipDateFormat = DateFormat('dd MMM'); // e.g. 02 Sep
 
   @override
   void initState() {
@@ -30,21 +54,26 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
     if (widget.initialFilter != null) {
       _currentFilter = widget.initialFilter!;
     }
+    if (_currentFilter == 'Upcoming') {
+      final now = DateTime.now();
+      _selectedMonth = DateTime(now.year, now.month + 1, 1);
+    }
     _loadFromCache();
     _loadAllData();
   }
 
   Future<void> _loadFromCache() async {
     final cached = await DataManager().getCachedAllInstallments();
-    if (cached != null && cached.isNotEmpty) {
-      if (mounted) setState(() => _allItems = cached);
+    if (cached != null && cached.isNotEmpty && mounted) {
+      setState(() => _allItems = cached);
     }
   }
 
   Future<void> _loadAllData() async {
     if (_allItems.isEmpty) setState(() => _isLoading = true);
     try {
-      final list = await ApiService.fetchAllInstallmentsSummary(page: 0, size: 2000);
+      final List<PlayerInstallmentSummary> list =
+      await ApiService.fetchAllInstallmentsSummary(page: 0, size: 2000);
       await DataManager().saveAllInstallments(list);
       if (mounted) {
         setState(() {
@@ -54,89 +83,58 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
         });
       }
     } catch (e) {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) setState(() { _isLoading = false; _error = e.toString(); });
     }
   }
 
-  // --- 1. FILTER PICKER: MONTH/YEAR DROPDOWNS (As requested for filtering) ---
-  Future<DateTime?> _showMonthYearPicker(DateTime initial) async {
-    int selectedYear = initial.year;
-    int selectedMonth = initial.month;
-
-    return await showDialog<DateTime>(
+  // --- Date Picker Logic ---
+  Future<void> _pickMonthForFilter() async {
+    final now = DateTime.now();
+    final picked = await showDialog<DateTime>(
       context: context,
-      builder: (BuildContext context) {
-        return StatefulBuilder(
-          builder: (context, setStateDialog) {
-            return AlertDialog(
-              title: const Text("Select Month & Year"),
-              content: SizedBox(
-                width: 300,
-                height: 80,
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: DropdownButtonFormField<int>(
-                        value: selectedMonth,
-                        decoration: const InputDecoration(labelText: 'Month', border: OutlineInputBorder()),
-                        items: List.generate(12, (index) {
-                          int month = index + 1;
-                          String name = DateFormat('MMM').format(DateTime(2024, month));
-                          return DropdownMenuItem(value: month, child: Text(name));
-                        }),
-                        onChanged: (val) {
-                          if (val != null) setStateDialog(() => selectedMonth = val);
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: DropdownButtonFormField<int>(
-                        value: selectedYear,
-                        decoration: const InputDecoration(labelText: 'Year', border: OutlineInputBorder()),
-                        items: List.generate(11, (index) {
-                          int year = 2020 + index;
-                          return DropdownMenuItem(value: year, child: Text(year.toString()));
-                        }),
-                        onChanged: (val) {
-                          if (val != null) setStateDialog(() => selectedYear = val);
-                        },
-                      ),
-                    ),
-                  ],
+      builder: (context) {
+        int selectedYear = _selectedMonth.year;
+        int selectedMonth = _selectedMonth.month;
+        return StatefulBuilder(builder: (context, setStateDialog) {
+          return AlertDialog(
+            title: const Text("Select Month"),
+            content: Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<int>(
+                    value: selectedMonth,
+                    items: List.generate(12, (i) => DropdownMenuItem(value: i+1, child: Text(DateFormat('MMM').format(DateTime(2024, i+1))))),
+                    onChanged: (v) => setStateDialog(() => selectedMonth = v!),
+                  ),
                 ),
-              ),
-              actions: [
-                TextButton(
-                  child: const Text("Cancel"),
-                  onPressed: () => Navigator.of(context).pop(),
-                ),
-                ElevatedButton(
-                  child: const Text("Select"),
-                  onPressed: () {
-                    Navigator.of(context).pop(DateTime(selectedYear, selectedMonth, 1));
-                  },
+                const SizedBox(width: 16),
+                Expanded(
+                  child: DropdownButtonFormField<int>(
+                    value: selectedYear,
+                    items: List.generate(5, (i) => DropdownMenuItem(value: now.year - 2 + i, child: Text('${now.year - 2 + i}'))),
+                    onChanged: (v) => setStateDialog(() => selectedYear = v!),
+                  ),
                 ),
               ],
-            );
-          },
-        );
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context, DateTime(selectedYear, selectedMonth, 1)),
+                child: const Text("Select"),
+              ),
+            ],
+          );
+        });
       },
     );
+    if (picked != null) setState(() => _selectedMonth = picked);
   }
 
-  Future<void> _pickMonthForFilter() async {
-    final picked = await _showMonthYearPicker(_selectedMonth);
-    if (picked != null) {
-      setState(() => _selectedMonth = picked);
-    }
-  }
-
-  // --- 2. EXTEND DATE PICKER: STANDARD CALENDAR (As requested for Extending) ---
+  // --- 1. EXTEND DATE LOGIC ---
   Future<void> _showExtendDialog(int installmentId, DateTime? currentDueDate) async {
     DateTime? selectedDate;
     final now = DateTime.now();
-    // Default to start from current due date or tomorrow
     final initialDate = (currentDueDate != null && currentDueDate.isAfter(now))
         ? currentDueDate
         : now.add(const Duration(days: 1));
@@ -151,11 +149,11 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('Pick a new due date from the calendar.', style: TextStyle(color: Colors.grey)),
+                  const Text('Pick a new due date for this installment.',
+                      style: TextStyle(color: Colors.grey)),
                   const SizedBox(height: 20),
                   InkWell(
                     onTap: () async {
-                      // SHOW CALENDAR PICKER HERE
                       final picked = await showDatePicker(
                         context: dialogContext,
                         initialDate: selectedDate ?? initialDate,
@@ -163,15 +161,14 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
                         lastDate: DateTime(2030),
                         helpText: 'Select New Due Date',
                       );
-
-                      if (picked != null) {
-                        setStateDialog(() => selectedDate = picked);
-                      }
+                      if (picked != null) setStateDialog(() => selectedDate = picked);
                     },
                     borderRadius: BorderRadius.circular(8),
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-                      decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade400), borderRadius: BorderRadius.circular(8)),
+                      decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey.shade400),
+                          borderRadius: BorderRadius.circular(8)),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -180,8 +177,7 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
                             style: TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w600,
-                                color: selectedDate == null ? Colors.grey : Colors.black87
-                            ),
+                                color: selectedDate == null ? Colors.grey : Colors.black87),
                           ),
                           const Icon(Icons.calendar_month, color: Colors.deepPurple),
                         ],
@@ -191,19 +187,28 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
                 ],
               ),
               actions: [
-                TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+                TextButton(
+                    onPressed: () => Navigator.pop(dialogContext),
+                    child: const Text('Cancel')),
                 ElevatedButton(
-                  onPressed: selectedDate == null ? null : () async {
-                    Navigator.pop(dialogContext); // Close dialog
+                  onPressed: selectedDate == null
+                      ? null
+                      : () async {
+                    Navigator.pop(dialogContext);
                     try {
-                      await ApiService.extendInstallmentDate(installmentId: installmentId, newDate: selectedDate!);
+                      await ApiService.extendInstallmentDate(
+                          installmentId: installmentId,
+                          newDate: selectedDate!);
                       EventBus().fire(PlayerEvent('installment_updated'));
                       if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Updated to ${df.format(selectedDate!)}')));
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                            content: Text('Updated to ${df.format(selectedDate!)}')));
                         _loadAllData();
                       }
                     } catch (e) {
-                      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e')));
+                      if (mounted)
+                        ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Failed: $e')));
                     }
                   },
                   child: const Text('Update'),
@@ -216,228 +221,427 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
     );
   }
 
-  // --- FILTER LOGIC ---
-  // ... inside _getFilteredItems ...
-  List<PlayerInstallmentSummary> _getFilteredItems() {
-    String status(PlayerInstallmentSummary p) => p.status.toUpperCase().replaceAll('_', ' ').trim();
-    final now = DateTime.now();
-    final startOfToday = DateTime(now.year, now.month, now.day);
+  // --- 2. INSTALLMENT OPTIONS (Triggered by clicking a chip) ---
+  void _showInstallmentOptions(PlayerInstallmentSummary inst) {
+    if (inst.installmentId == null) return;
 
-    // Define Next Month
-    final nextMonthDate = DateTime(now.year, now.month + 1, 1);
-    final nextMonth = nextMonthDate.month;
-    final nextYear = nextMonthDate.year;
+    final isPaid = (inst.status ?? '').toUpperCase() == 'PAID';
+    String headerDate = "No Date";
+    String headerLabel = "Due Date";
 
+    if (isPaid) {
+      headerLabel = "Paid On";
+      // Use lastPaymentDate if available, else fall back
+      headerDate = inst.lastPaymentDate != null
+          ? df.format(inst.lastPaymentDate!)
+          : (inst.dueDate != null ? df.format(inst.dueDate!) : 'Completed');
+    } else {
+      headerLabel = "Due Date";
+      headerDate = inst.dueDate != null ? df.format(inst.dueDate!) : 'No Date';
+    }
+
+    showModalBottomSheet(
+        context: context,
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+        builder: (ctx) {
+          return Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text("$headerLabel: $headerDate", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                const SizedBox(height: 8),
+                Text("Amount: ₹${inst.installmentAmount}  •  Paid: ₹${inst.totalPaid}", style: TextStyle(color: Colors.grey[700])),
+                const SizedBox(height: 24),
+
+                if(!isPaid) // Only show extend option if NOT paid
+                  ListTile(
+                    leading: const Icon(Icons.edit_calendar, color: Colors.blue),
+                    title: const Text("Extend Due Date"),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _showExtendDialog(inst.installmentId!, inst.dueDate);
+                    },
+                  ),
+
+                ListTile(
+                  leading: const Icon(Icons.receipt_long, color: Colors.green),
+                  title: const Text("View / Pay This Installment"),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    // Navigate to payments just for this installment
+                    Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => PaymentsListScreen(
+                                installmentId: inst.installmentId!,
+                                remainingAmount: inst.remaining)));
+                  },
+                ),
+              ],
+            ),
+          );
+        }
+    );
+  }
+
+
+  // --- 3. PAY DIALOG FUNCTION ---
+  Future<void> _showPayDialog(PlayerConsolidatedSummary player) async {
+    final amountCtl = TextEditingController(text: player.totalRemaining.toStringAsFixed(0));
+    bool paying = false;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: Text('Pay for ${player.playerName}'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('This payment will be allocated to the oldest dues first.', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: amountCtl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Amount', border: OutlineInputBorder(), prefixText: '₹ '),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: paying ? null : () => Navigator.pop(ctx), child: const Text('Cancel')),
+              ElevatedButton(
+                onPressed: paying ? null : () async {
+                  final amt = double.tryParse(amountCtl.text) ?? 0.0;
+                  if (amt <= 0) return;
+                  setDialogState(() => paying = true);
+                  try {
+                    await ApiService.payOverdue(playerId: player.playerId, amount: amt);
+                    EventBus().fire(PlayerEvent('payment_recorded'));
+                    EventBus().fire(PlayerEvent('installment_updated'));
+                    if (mounted) {
+                      Navigator.pop(ctx);
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Payment Recorded Successfully!')));
+                      _loadAllData();
+                    }
+                  } catch (e) {
+                    if (mounted) {
+                      setDialogState(() => paying = false);
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                    }
+                  }
+                },
+                child: paying ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Pay Now'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  // --- Filtering & Grouping Logic ---
+  List<PlayerInstallmentSummary> _getFilteredRawItems() {
     if (_currentFilter == 'All') return _allItems;
 
-    // 1. Upcoming (Next Month)
     if (_currentFilter == 'Upcoming') {
+      final sel = _selectedMonth;
       return _allItems.where((p) {
         if (p.dueDate == null) return false;
-        if (status(p) == 'PAID') return false;
-
-        return p.dueDate!.year == nextYear &&
-            p.dueDate!.month == nextMonth;
+        final st = (p.status ?? '').toUpperCase().replaceAll('_', ' ').trim();
+        if (st == 'PAID') return false;
+        return p.dueDate!.year == sel.year && p.dueDate!.month == sel.month;
       }).toList();
     }
 
-    // 2. Overdue
-    if (_currentFilter == 'Overdue') {
-      return _allItems.where((p) {
-        if (p.dueDate == null) return false;
-        if (status(p) == 'PAID') return false;
-        return p.dueDate!.isBefore(startOfToday);
-      }).toList();
-    }
-
-    // 3. Due (Month) - Defaults to current month, or selected from calendar
     if (_currentFilter == 'Due (Month)') {
       return _allItems.where((p) {
         if (p.dueDate == null) return false;
-        if (status(p) == 'PAID') return false;
-        return p.dueDate!.year == _selectedMonth.year &&
-            p.dueDate!.month == _selectedMonth.month;
+        final st = (p.status ?? '').toUpperCase().replaceAll('_', ' ').trim();
+        if (st == 'PAID') return false;
+        return p.dueDate!.year == _selectedMonth.year && p.dueDate!.month == _selectedMonth.month;
       }).toList();
     }
 
-    // Standard Filters (Pending global, etc.)
-    // Note: If you want 'Pending' to still mean Global 0 Paid, keep it:
-    if (_currentFilter == 'Pending') {
-      return _allItems.where((p) => p.totalPaid == 0).toList();
-    }
-
-    return _allItems.where((p) => status(p) == _currentFilter.toUpperCase()).toList();
+    final filterUpper = _currentFilter.toUpperCase();
+    return _allItems.where((p) {
+      final st = (p.status ?? '').toUpperCase().replaceAll('_', ' ').trim();
+      return st == filterUpper;
+    }).toList();
   }
 
-  Color _getStatusColor(String status) {
-    switch (status) {
-      case 'PAID': return Colors.green;
-      case 'PARTIALLY_PAID': return Colors.orange;
-      case 'PENDING': return Colors.blue;
-      case 'OVERDUE': return Colors.red;
-      default: return Colors.grey;
+  List<PlayerConsolidatedSummary> _getGroupedItems() {
+    final rawItems = _getFilteredRawItems();
+    final Map<int, PlayerConsolidatedSummary> groupedMap = {};
+
+    for (var item in rawItems) {
+      if (item.playerId == null) continue;
+
+      if (!groupedMap.containsKey(item.playerId)) {
+        groupedMap[item.playerId!] = PlayerConsolidatedSummary(
+          playerId: item.playerId!,
+          playerName: item.playerName,
+          groupName: item.groupName ?? '',
+          phone: item.phone ?? '',
+          installments: [],
+        );
+      }
+
+      final summary = groupedMap[item.playerId]!;
+      summary.totalAmount += (item.installmentAmount ?? 0.0);
+      summary.totalPaid += (item.totalPaid ?? 0.0);
+      summary.installments.add(item);
     }
+
+    for (var summary in groupedMap.values) {
+      summary.totalRemaining = summary.totalAmount - summary.totalPaid;
+      summary.installments.sort((a, b) {
+        if(a.dueDate == null) return 1;
+        if(b.dueDate == null) return -1;
+        return a.dueDate!.compareTo(b.dueDate!);
+      });
+    }
+
+    final resultList = groupedMap.values.toList();
+    resultList.sort((a, b) => b.totalRemaining.compareTo(a.totalRemaining));
+
+    return resultList;
   }
 
-  void _navigateToPlayerDetails(PlayerInstallmentSummary p) {
-    final player = Player(id: p.playerId, name: p.playerName, phone: p.phone ?? '', group: p.groupName ?? '');
-    Navigator.push(context, MaterialPageRoute(builder: (_) => InstallmentsScreen(player: player)))
+  void _navigateToPlayerDetails(PlayerConsolidatedSummary summary) {
+    final player = Player(
+        id: summary.playerId,
+        name: summary.playerName,
+        phone: summary.phone,
+        group: summary.groupName);
+    Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => InstallmentsScreen(player: player)))
         .then((_) => _loadAllData());
   }
 
-  Future<void> _openPayments(PlayerInstallmentSummary row) async {
-    if (row.installmentId != null) {
-      await Navigator.push(context, MaterialPageRoute(
-          builder: (_) => PaymentsListScreen(installmentId: row.installmentId!, remainingAmount: row.remaining)));
-      _loadAllData();
-    }
-  }
-
-  Widget _buildRow(PlayerInstallmentSummary p) {
-    Color statusColor = _getStatusColor(p.status);
-    final isPaid = p.status == 'PAID';
-    final dueText = p.dueDate != null ? df.format(p.dueDate!) : '—';
-    final paidDateText = p.lastPaymentDate != null ? df.format(p.lastPaymentDate!) : '—';
-
+  Color _getGroupStatusColor(PlayerConsolidatedSummary summary) {
     final now = DateTime.now();
     final startOfToday = DateTime(now.year, now.month, now.day);
-    final isOverdue = !isPaid && p.dueDate != null && p.dueDate!.isBefore(startOfToday);
 
-    if (isOverdue) statusColor = Colors.red;
+    bool hasOverdue = summary.installments.any((i) =>
+    i.dueDate != null &&
+        i.dueDate!.isBefore(startOfToday) &&
+        (i.status?.toUpperCase() != 'PAID')
+    );
 
-    final total = p.installmentAmount ?? 0.0;
-    final paid = p.totalPaid;
-    final progress = total == 0 ? 0.0 : (paid / total).clamp(0.0, 1.0);
+    if (hasOverdue) return Colors.red;
+    if (summary.totalRemaining <= 0 && summary.totalAmount > 0) return Colors.green;
+    return Colors.blue;
+  }
+
+  Widget _buildGroupedCard(PlayerConsolidatedSummary summary) {
+    final statusColor = _getGroupStatusColor(summary);
+    final count = summary.installments.length;
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 14),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))],
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 10, offset: const Offset(0, 4))
+        ],
+        border: Border(left: BorderSide(color: statusColor, width: 6)),
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: IntrinsicHeight(
-          child: Row(
-            children: [
-              Container(width: 6, color: statusColor),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(14.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () => _navigateToPlayerDetails(summary),
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(p.playerName, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-                                const SizedBox(height: 2),
-                                Text("${p.groupName ?? ''}", style: TextStyle(color: Colors.grey[600], fontSize: 12)),
-                              ],
-                            ),
-                          ),
-                          if (!isPaid)
-                            SizedBox(
-                              height: 30, width: 30,
-                              child: PopupMenuButton<String>(
-                                padding: EdgeInsets.zero,
-                                icon: const Icon(Icons.more_horiz, color: Colors.grey),
-                                onSelected: (val) {
-                                  if (val == 'extend') _showExtendDialog(p.installmentId!, p.dueDate);
-                                },
-                                itemBuilder: (context) => [
-                                  const PopupMenuItem(value: 'extend', child: Row(children: [
-                                    Icon(Icons.edit_calendar, color: Colors.blue, size: 20),
-                                    SizedBox(width: 8),
-                                    Text('Extend Due Date'),
-                                  ])),
-                                ],
-                              ),
-                            ),
+                          Text(summary.playerName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
+                          const SizedBox(height: 2),
+                          Text(summary.groupName, style: TextStyle(color: Colors.grey[600], fontSize: 12)),
                         ],
                       ),
-                      const SizedBox(height: 12),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: LinearProgressIndicator(
-                          value: progress,
-                          backgroundColor: Colors.grey.shade100,
-                          valueColor: AlwaysStoppedAnimation<Color>(statusColor),
-                          minHeight: 8,
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: statusColor.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        "Items: $count",
+                        style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ),
+
+                const Divider(height: 24),
+
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    _buildFinanceColumn("Total", "₹${summary.totalAmount.toStringAsFixed(0)}", Colors.black87),
+                    _buildFinanceColumn("Paid", "₹${summary.totalPaid.toStringAsFixed(0)}", Colors.green[700]!),
+                    _buildFinanceColumn("Remaining", "₹${summary.totalRemaining.toStringAsFixed(0)}", Colors.red[700]!),
+                  ],
+                ),
+
+                const SizedBox(height: 16),
+
+                // In the chips section of _buildGroupedCard method
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: summary.installments.take(5).map<Widget>((inst) {
+                    final isPaid = (inst.status ?? '').toUpperCase() == 'PAID';
+                    final isOverdue = !isPaid && inst.dueDate != null && inst.dueDate!.isBefore(DateTime.now());
+
+                    String dueDateLabel = 'N/A';
+                    String paidDateLabel = '';
+
+                    // Get due date text
+                    if (inst.dueDate != null) {
+                      dueDateLabel = chipDateFormat.format(inst.dueDate!);
+                    }
+
+                    // Get paid date text if paid
+                    if (isPaid && inst.lastPaymentDate != null) {
+                      paidDateLabel = ' ✅ ${chipDateFormat.format(inst.lastPaymentDate!)}';
+                    }
+
+                    Color chipColor = Colors.grey.shade100;
+                    Color textColor = Colors.grey.shade800;
+
+                    if (isPaid) {
+                      chipColor = Colors.green.shade50;
+                      textColor = Colors.green.shade800;
+                    } else if (isOverdue) {
+                      chipColor = Colors.red.shade50;
+                      textColor = Colors.red.shade800;
+                    }
+
+                    return InkWell(
+                      onTap: () => _showInstallmentOptions(inst),
+                      borderRadius: BorderRadius.circular(6),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                            color: chipColor,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: chipColor.withOpacity(1), width: 0.5)
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // Due date with strikethrough if paid
+                            Text(
+                              dueDateLabel,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: textColor,
+                                fontWeight: FontWeight.w600,
+                                decoration: isPaid ? TextDecoration.lineThrough : TextDecoration.none,
+                                decorationColor: textColor,
+                                decorationThickness: 2,
+                              ),
+                            ),
+                            // Paid date if available
+                            if (paidDateLabel.isNotEmpty)
+                              Text(
+                                paidDateLabel,
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.green.shade700,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 8),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text("Paid: ₹${p.totalPaid.toStringAsFixed(0)}", style: TextStyle(color: Colors.grey[700], fontSize: 13, fontWeight: FontWeight.w500)),
-                          Text("Total: ₹${total.toStringAsFixed(0)}", style: const TextStyle(color: Colors.black87, fontSize: 13, fontWeight: FontWeight.bold)),
-                        ],
-                      ),
-                      const Divider(height: 24),
-                      Row(
-                        children: [
-                          Icon(isPaid ? Icons.check_circle : (isOverdue ? Icons.warning_amber_rounded : Icons.calendar_today), size: 18, color: statusColor),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: isPaid
-                                ? Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text("Paid: $paidDateText", style: TextStyle(color: statusColor, fontSize: 12, fontWeight: FontWeight.bold)),
-                                Text("Due: $dueText", style: TextStyle(color: Colors.grey[500], fontSize: 11)),
-                              ],
-                            )
-                                : Text(
-                              isOverdue ? "Overdue $dueText" : "Due $dueText",
-                              style: TextStyle(color: statusColor, fontSize: 12, fontWeight: FontWeight.w600),
-                            ),
-                          ),
-                          if (p.installmentId != null)
-                            SizedBox(
-                              height: 32,
-                              child: ElevatedButton(
-                                onPressed: () => _openPayments(p),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFFF3F4F6),
-                                  foregroundColor: Colors.black87,
-                                  elevation: 0,
-                                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                ),
-                                child: const Text("View / Pay", style: TextStyle(fontSize: 12)),
-                              ),
-                            ),
-                        ],
-                      )
-                    ],
-                  ),
+                    );
+                  }).toList()
+                    ..add(summary.installments.length > 5
+                        ? Text("+${summary.installments.length - 5} more", style: const TextStyle(fontSize: 10, color: Colors.grey))
+                        : const SizedBox.shrink()),
                 ),
-              ),
-            ],
+                const SizedBox(height: 16),
+
+                // --- BUTTONS ---
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => _navigateToPlayerDetails(summary),
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(color: Colors.grey.shade300),
+                          foregroundColor: Colors.black87,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                        child: const Text("View Details"),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: summary.totalRemaining > 0
+                            ? () => _showPayDialog(summary)
+                            : null,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: statusColor,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          elevation: 0,
+                        ),
+                        child: const Text("Pay Now"),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
+  Widget _buildFinanceColumn(String label, String value, Color color) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+        const SizedBox(height: 2),
+        Text(value, style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: color)),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final filteredItems = _getFilteredItems();
-    final monthLabel = DateFormat('MMMM yyyy').format(_selectedMonth);
+    final groupedItems = _getGroupedItems();
 
-    String titleText = 'All Installments (${_currentFilter})';
+    String titleText = 'All Installments';
     if (_currentFilter == 'Due (Month)') {
-      titleText = 'Due: ${DateFormat('MMMM yyyy').format(_selectedMonth)}';
+      titleText = 'Due: ${DateFormat('MMM yyyy').format(_selectedMonth)}';
     } else if (_currentFilter == 'Upcoming') {
-      final next = DateTime.now().add(const Duration(days: 30));
-      titleText = 'Upcoming: ${DateFormat('MMMM yyyy').format(next)}';
+      titleText = 'Upcoming: ${DateFormat('MMM yyyy').format(_selectedMonth)}';
+    } else if (_currentFilter != 'All') {
+      titleText = '$_currentFilter List';
     }
+
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
       appBar: AppBar(
@@ -446,41 +650,51 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
         elevation: 0,
         foregroundColor: Colors.black87,
         actions: [
-          if (_currentFilter == 'Due (Month)')
+          if (_currentFilter == 'Due (Month)' || _currentFilter == 'Upcoming')
             IconButton(
               icon: const Icon(Icons.calendar_month, color: Colors.deepPurple),
               onPressed: _pickMonthForFilter,
-              tooltip: "Select Month",
             ),
-
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadAllData),
           PopupMenuButton<String>(
             icon: const Icon(Icons.filter_list),
-            onSelected: (String val) => setState(() => _currentFilter = val),
+            initialValue: _currentFilter,
+            onSelected: (String val) {
+              setState(() {
+                _currentFilter = val;
+                if (_currentFilter == 'Upcoming') {
+                  final now = DateTime.now();
+                  if (_selectedMonth.isBefore(DateTime(now.year, now.month + 1, 1))) {
+                    _selectedMonth = DateTime(now.year, now.month + 1, 1);
+                  }
+                }
+              });
+            },
             itemBuilder: (context) => [
-              const PopupMenuItem(value: 'All', child: Text('All')),
-              const PopupMenuItem(value: 'Due (Month)', child: Text('Due (Month)')),
-              const PopupMenuItem(value: 'Upcoming', child: Text('Upcoming (Next Month)')), // ADDED
-              const PopupMenuItem(value: 'Pending', child: Text('Pending (Global)')),
-              const PopupMenuItem(value: 'Partially Paid', child: Text('Partially Paid')),
-              const PopupMenuItem(value: 'Overdue', child: Text('Overdue')),
-              const PopupMenuItem(value: 'Paid', child: Text('Paid')),
+              const PopupMenuItem(value: 'All', child: Text('All Installments')),
+              const PopupMenuItem(value: 'Due (Month)', child: Text('Due (Specific Month)')),
+              const PopupMenuItem(value: 'Upcoming', child: Text('Upcoming')),
+              const PopupMenuDivider(),
+              const PopupMenuItem(value: 'Paid', child: Text('Paid Players')),
+              const PopupMenuItem(value: 'Pending', child: Text('Pending Players')),
             ],
           ),
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadAllData),
         ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
           ? Center(child: Text("Error: $_error"))
-          : filteredItems.isEmpty
-          ? Center(child: Text("No players found for $_currentFilter"))
+          : groupedItems.isEmpty
+          ? const Center(child: Text("No records found", style: TextStyle(color: Colors.grey)))
           : RefreshIndicator(
         onRefresh: _loadAllData,
         child: ListView.builder(
-          padding: const EdgeInsets.only(top: 12, bottom: 24),
-          itemCount: filteredItems.length,
-          itemBuilder: (ctx, i) => _buildRow(filteredItems[i]),
+          padding: const EdgeInsets.only(top: 12, bottom: 80),
+          itemCount: groupedItems.length,
+          itemBuilder: (ctx, i) {
+            return _buildGroupedCard(groupedItems[i]);
+          },
         ),
       ),
     );

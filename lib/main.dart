@@ -3,6 +3,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 // ... other imports ...
 import 'package:textewidget/screens/installments/all_installments_screen.dart';
 import 'package:textewidget/screens/installments/all_players_installments_screen.dart';
+import 'package:textewidget/screens/installments/overdue_players_screen.dart';
 import 'package:textewidget/screens/reminders/sms_reminder_screen.dart';
 import 'screens/splash/splash_screen.dart';
 import 'screens/landing/intro_landing_screen.dart';
@@ -53,6 +54,9 @@ class MyApp extends StatelessWidget {
           }
           return const AllInstallmentsScreen();
         },
+        '/overdue-players': (context) => OverduePlayersScreen(),
+
+
 
         '/installment-summary': (context) {
           final args = ModalRoute.of(context)!.settings.arguments;
