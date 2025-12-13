@@ -286,8 +286,7 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
     );
   }
 
-
-  // --- 3. PAY DIALOG FUNCTION ---
+// AllInstallmentsScreen मध्ये
   Future<void> _showPayDialog(PlayerConsolidatedSummary player) async {
     final amountCtl = TextEditingController(text: player.totalRemaining.toStringAsFixed(0));
     bool paying = false;
@@ -301,39 +300,68 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('This payment will be allocated to the oldest dues first.', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                const Text(
+                  'This payment will be allocated to all unpaid installments (overdue + pending + future).',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
                 const SizedBox(height: 16),
                 TextField(
                   controller: amountCtl,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Amount', border: OutlineInputBorder(), prefixText: '₹ '),
+                  decoration: const InputDecoration(
+                    labelText: 'Amount',
+                    border: OutlineInputBorder(),
+                    prefixText: '₹ ',
+                  ),
                 ),
               ],
             ),
             actions: [
-              TextButton(onPressed: paying ? null : () => Navigator.pop(ctx), child: const Text('Cancel')),
+              TextButton(
+                onPressed: paying ? null : () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
               ElevatedButton(
                 onPressed: paying ? null : () async {
                   final amt = double.tryParse(amountCtl.text) ?? 0.0;
                   if (amt <= 0) return;
+
                   setDialogState(() => paying = true);
+
                   try {
-                    await ApiService.payOverdue(playerId: player.playerId, amount: amt);
+                    // ✅ payUnpaid वापरा (सर्व unpaid installments)
+                    await ApiService.payUnpaid(
+                      playerId: player.playerId,
+                      amount: amt,
+                    );
+
                     EventBus().fire(PlayerEvent('payment_recorded'));
                     EventBus().fire(PlayerEvent('installment_updated'));
+
                     if (mounted) {
                       Navigator.pop(ctx);
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Payment Recorded Successfully!')));
-                      _loadAllData();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Payment Recorded Successfully!')),
+                      );
+                      await _loadAllData();
                     }
                   } catch (e) {
+                    print('Payment Error: $e');
                     if (mounted) {
                       setDialogState(() => paying = false);
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Error: $e')),
+                      );
                     }
                   }
                 },
-                child: paying ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Pay Now'),
+                child: paying
+                    ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+                    : const Text('Pay Now'),
               ),
             ],
           );

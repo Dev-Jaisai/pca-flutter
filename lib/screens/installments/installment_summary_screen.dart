@@ -39,20 +39,24 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
     }
     _filter = widget.initialFilter ?? 'all';
     _load();
-  }
-
-  Future<void> _load() async {
+  }Future<void> _load() async {
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      List<PlayerInstallmentSummary> list;
+      List<PlayerInstallmentSummary> list = await ApiService.fetchAllInstallmentsSummary();
 
-      if (_filter == 'overdue') {
-        list = await ApiService.fetchAllInstallmentsSummary();
-      } else {
-        list = await ApiService.fetchInstallmentSummary(_selectedMonth);
+      // Filter by due date month when not in 'overdue' filter
+      if (_filter != 'overdue') {
+        final parts = _selectedMonth.split('-');
+        final selectedYear = int.parse(parts[0]);
+        final selectedMonth = int.parse(parts[1]);
+
+        list = list.where((item) {
+          if (item.dueDate == null) return false;
+          return item.dueDate!.year == selectedYear && item.dueDate!.month == selectedMonth;
+        }).toList();
       }
 
       final filtered = _applyFilter(list);
@@ -65,7 +69,6 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
       if (mounted) setState(() => _loading = false);
     }
   }
-
   void _calculateStats(List<PlayerInstallmentSummary> items) {
     _totalAmount = 0;
     _totalPaid = 0;

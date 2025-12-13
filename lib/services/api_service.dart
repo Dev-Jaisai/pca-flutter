@@ -440,17 +440,36 @@ class ApiService {
     final body = {
       'playerId': playerId,
       'amount': amount,
-      'paymentMethod': 'Cash' // Or add a dropdown in dialog
+      'paymentMethod': 'Cash'
     };
 
-    final response = await http.post(
-      url,
-      headers: {'Content-Type': 'application/json'},
-      body: json.encode(body),
-    );
+    // DEBUG: Print request details
+    print('📤 PAYOVERDUE REQUEST:');
+    print('URL: $url');
+    print('Body: $body');
 
-    if (response.statusCode != 200) {
-      throw Exception('Failed to record overdue payment: ${response.body}');
+    try {
+      final response = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode(body),
+      );
+
+      // DEBUG: Print response details
+      print('📥 PAYOVERDUE RESPONSE:');
+      print('Status Code: ${response.statusCode}');
+      print('Headers: ${response.headers}');
+      print('Body: ${response.body}');
+
+      if (response.statusCode != 200) {
+        print('❌ ERROR: Status code is not 200');
+        throw Exception('Failed to record overdue payment: ${response.statusCode} - ${response.body}');
+      }
+
+      print('✅ PAYOVERDUE SUCCESS!');
+    } catch (e) {
+      print('❌ NETWORK ERROR: $e');
+      rethrow;
     }
   }
 
@@ -463,6 +482,39 @@ class ApiService {
 
     if (response.statusCode != 200) {
       throw Exception('Failed to update player: ${response.body}');
+    }
+  }
+  static Future<void> payUnpaid({required int playerId, required double amount}) async {
+    final url = Uri.parse('$baseUrl/api/payments/pay-unpaid');
+    final body = {
+      'playerId': playerId,
+      'amount': amount,
+      'paymentMethod': 'Cash'
+    };
+
+    print('📤 PAY UNPAID REQUEST:');
+    print('URL: $url');
+    print('Body: $body');
+
+    try {
+      final response = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode(body),
+      );
+
+      print('📥 PAY UNPAID RESPONSE:');
+      print('Status Code: ${response.statusCode}');
+      print('Body: ${response.body}');
+
+      if (response.statusCode != 200) {
+        throw Exception('Failed to record payment: ${response.body}');
+      }
+
+      print('✅ PAYMENT SUCCESS!');
+    } catch (e) {
+      print('❌ ERROR: $e');
+      rethrow;
     }
   }
 }
