@@ -517,4 +517,27 @@ class ApiService {
       rethrow;
     }
   }
+
+  // Add this inside ApiService class
+  static Future<void> deleteFeeStructure(int id) async {
+    final url = Uri.parse('$baseUrl/api/fees/$id');
+    final response = await http.delete(url);
+
+    if (response.statusCode != 200 && response.statusCode != 204) {
+      throw Exception('Failed to delete fee: ${response.body}');
+    }
+  }
+  // Add this inside ApiService class
+  static Future<void> updateFeeStructure(int id, Map<String, dynamic> data) async {
+    final url = Uri.parse('$baseUrl/api/fees/$id');
+    final response = await http.put(
+      url,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(data),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to update fee: ${response.body}');
+    }
+  }
 }

@@ -103,13 +103,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    const bg = Color(0xFFFBF8FF);
+    const bg = Color(0xFFFBF8FF);//local
     const accent = Color(0xFF9B6CFF);
 
     return Scaffold(
       backgroundColor: bg,
       appBar: AppBar(
-        title: const Text('Players Directory'),
+        title: Text('All players'.toUpperCase()),
         backgroundColor: Colors.white,
         elevation: 0,
         foregroundColor: Colors.black87,
