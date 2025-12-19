@@ -129,11 +129,18 @@ class _FeeListScreenState extends State<FeeListScreen> {
         ],
       ),
     );
-
     if (confirmed == true) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Delete API coming soon')),
-      );
+      try {
+        await ApiService.deleteFeeStructure(fee.id); // Call the new API
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Fee structure deleted')),
+        );
+        _loadData(); // Refresh list
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Delete failed: $e')),
+        );
+      }
     }
   }
 
@@ -267,19 +274,40 @@ class _EditFeeDialogState extends State<EditFeeDialog> {
     _feeController.text = widget.fee.monthlyFee.toString();
     _effectiveFrom = widget.fee.effectiveFrom;
     _effectiveTo = widget.fee.effectiveTo;
-  }
-
-  Future<void> _submit() async {
+  }Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => _loading = true);
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Update API coming soon')),
-    );
+    try {
+      final double monthlyFee = double.parse(_feeController.text.trim());
 
-    Navigator.pop(context, true);
-    setState(() => _loading = false);
+      final Map<String, dynamic> updateData = {
+        // ✅ CRITICAL FIX: Sending the groupId from your model
+        'groupId': widget.fee.groupId,
+
+        'monthlyFee': monthlyFee,
+        if (_effectiveFrom != null) 'effectiveFrom': _effectiveFrom!.toIso8601String().split('T')[0],
+        if (_effectiveTo != null) 'effectiveTo': _effectiveTo!.toIso8601String().split('T')[0],
+      };
+
+      await ApiService.updateFeeStructure(widget.fee.id, updateData);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Fee structure updated')),
+        );
+        Navigator.pop(context, true);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Update failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   Future<void> _pickDate(bool isFrom) async {
