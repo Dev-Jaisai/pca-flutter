@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:hive_flutter/hive_flutter.dart';
 import '../../services/api_service.dart';
+import '../../services/data_manager.dart'; // ✅ Import DataManager
 import '../../models/group.dart';
 
 class GroupListScreen extends StatefulWidget {
@@ -11,9 +11,8 @@ class GroupListScreen extends StatefulWidget {
 }
 
 class _GroupListScreenState extends State<GroupListScreen> {
-  final _box = Hive.box('app_cache');
   List<Group> _groups = [];
-  bool _loading = false;
+  bool _loading = true;
 
   @override
   void initState() {
@@ -21,38 +20,33 @@ class _GroupListScreenState extends State<GroupListScreen> {
     _loadGroups();
   }
 
+  // ---------------------------------------------------------
+  // 🚀 OPTIMIZED LOAD LOGIC
+  // ---------------------------------------------------------
   Future<void> _loadGroups() async {
-    setState(() => _loading = true);
-
+    // 1. Instant Load from Cache
     try {
-      // Try to load from API first
-      final apiGroups = await ApiService.fetchGroups();
-
-      // Save to Hive cache
-      final groupsJson = apiGroups.map((g) => g.toJson()).toList();
-      await _box.put('groups_list', groupsJson);
-
-      setState(() {
-        _groups = apiGroups;
-      });
-    } catch (e) {
-      // If API fails, try loading from Hive cache
-      debugPrint('Failed to load groups from API: $e');
-
-      final cachedData = _box.get('groups_list', defaultValue: []);
-      if (cachedData is List) {
-        setState(() {
-          _groups = cachedData.map((json) => Group.fromJson(json)).toList();
-        });
+      final cached = await DataManager().getGroups();
+      if (cached.isNotEmpty) {
+        if (mounted) setState(() { _groups = cached; _loading = false; });
+      } else {
+        // Only show spinner if absolutely no data
+        if (mounted) setState(() => _loading = true);
       }
-    } finally {
-      setState(() => _loading = false);
+    } catch (e) {
+      // Ignore cache errors
     }
-  }
 
-  Future<void> _saveGroups() async {
-    final groupsJson = _groups.map((g) => g.toJson()).toList();
-    await _box.put('groups_list', groupsJson);
+    // 2. Fresh Fetch from API (Background)
+    try {
+      final fresh = await DataManager().getGroups(forceRefresh: true);
+      if (mounted) setState(() { _groups = fresh; _loading = false; });
+    } catch (e) {
+      if (mounted && _groups.isEmpty) {
+        setState(() => _loading = false); // Stop spinner on error
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to load: $e')));
+      }
+    }
   }
 
   void _addGroup() {
@@ -68,15 +62,11 @@ class _GroupListScreenState extends State<GroupListScreen> {
           autofocus: true,
         ),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel')
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           FilledButton(
             onPressed: () async {
               final name = controller.text.trim();
               if (name.isEmpty) return;
-
               Navigator.pop(ctx);
               await _createGroup(name);
             },
@@ -89,42 +79,34 @@ class _GroupListScreenState extends State<GroupListScreen> {
 
   Future<void> _createGroup(String name) async {
     setState(() => _loading = true);
-
     try {
-      // Create group in API
-      final createdGroup = await ApiService.createGroup(name: name);
+      await ApiService.createGroup(name: name);
 
-      // Add to local list
-      setState(() => _groups.add(createdGroup));
+      // ✅ Invalidate Cache so dropdowns elsewhere update immediately
+      DataManager().invalidateGroups();
 
-      // Save to Hive
-      await _saveGroups();
+      await _loadGroups(); // Refresh list
 
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Group "$name" created successfully'))
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Group "$name" created')));
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to create group: $e'))
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to create: $e')));
+      }
     } finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
-  Future<void> _deleteGroup(int index) async {
-    final group = _groups[index];
-
+  Future<void> _deleteGroup(Group group) async {
     final shouldDelete = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete Group'),
-        content: Text('Delete "${group.name}"? This will also delete associated fee structures.'),
+        content: Text('Delete "${group.name}"? This might affect fees linked to it.'),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Delete', style: TextStyle(color: Colors.red)),
@@ -136,32 +118,24 @@ class _GroupListScreenState extends State<GroupListScreen> {
     if (shouldDelete != true) return;
 
     setState(() => _loading = true);
-
     try {
-      // Delete from API
       await ApiService.deleteGroup(group.id);
 
-      // Remove from local list
-      setState(() => _groups.removeAt(index));
+      // ✅ Clear Caches
+      DataManager().invalidateGroups();
+      DataManager().invalidateFees(); // Fees might be deleted on backend cascade
 
-      // Save to Hive
-      await _saveGroups();
+      await _loadGroups();
 
-      // Also remove any fee structure for this group
-      final feeBox = Hive.box('app_cache');
-      final fees = Map<String, dynamic>.from(feeBox.get('fee_structures', defaultValue: {}));
-      fees.remove(group.name);
-      await feeBox.put('fee_structures', fees);
-
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Group "${group.name}" deleted'))
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Group "${group.name}" deleted')));
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Delete failed: $e'))
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete failed: $e')));
+      }
     } finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -187,11 +161,7 @@ class _GroupListScreenState extends State<GroupListScreen> {
           children: [
             Icon(Icons.group, size: 60, color: Colors.grey[400]),
             const SizedBox(height: 16),
-            Text(
-              'No groups added yet.\nTap + to add.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey[600]),
-            ),
+            Text('No groups added yet.\nTap + to add.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey[600])),
           ],
         ),
       )
@@ -206,18 +176,12 @@ class _GroupListScreenState extends State<GroupListScreen> {
             child: ListTile(
               leading: CircleAvatar(
                 backgroundColor: Colors.deepPurple.shade50,
-                child: Text(
-                  group.name[0].toUpperCase(),
-                  style: const TextStyle(color: Colors.deepPurple),
-                ),
+                child: Text(group.name.isNotEmpty ? group.name[0].toUpperCase() : '?', style: const TextStyle(color: Colors.deepPurple)),
               ),
-              title: Text(
-                group.name,
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
+              title: Text(group.name, style: const TextStyle(fontWeight: FontWeight.bold)),
               trailing: IconButton(
                 icon: const Icon(Icons.delete_outline, color: Colors.red),
-                onPressed: () => _deleteGroup(i),
+                onPressed: () => _deleteGroup(group),
               ),
             ),
           );

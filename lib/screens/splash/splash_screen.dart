@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../services/data_manager.dart';
 import '../landing/intro_landing_screen.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -33,6 +34,8 @@ class _SplashScreenState extends State<SplashScreen>
     );
 
     _controller.forward();
+    _startAppInitialization();
+
 
     Timer(const Duration(milliseconds: 1600), () {
       Navigator.of(context).pushReplacement(
@@ -40,10 +43,25 @@ class _SplashScreenState extends State<SplashScreen>
       );
     });
   }
+  Future<void> _startAppInitialization() async {
+    // 1. Initialize DataManager
+    await DataManager().init();
 
+    // 2. Wait for BOTH: Animation (min 1.6s) AND Data Fetching
+    await Future.wait([
+      Future.delayed(const Duration(milliseconds: 1600)), // Minimum show time
+      DataManager().prefetchAllData(), // Background Fetch
+    ]);
+
+    // 3. Navigate only after data is ready
+    if (mounted) {
+      Navigator.of(context).pushReplacementNamed('/intro');
+    }
+  }
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.white, // Good practice to have a base color
       body: Center(
         child: AnimatedBuilder(
           animation: _controller,

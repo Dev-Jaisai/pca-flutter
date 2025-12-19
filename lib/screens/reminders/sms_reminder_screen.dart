@@ -1,9 +1,9 @@
-import 'package:flutter/foundation.dart'
-    show kIsWeb, defaultTargetPlatform, TargetPlatform;
+import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../services/api_service.dart';
+import '../../services/data_manager.dart'; // ✅ Import DataManager
 import '../../models/player_installment_summary.dart';
 
 // Helper class to group data by player
@@ -44,76 +44,95 @@ class _SmsReminderScreenState extends State<SmsReminderScreen> {
     _loadData();
   }
 
+  // ---------------------------------------------------------
+  // 🚀 OPTIMIZED LOAD LOGIC
+  // ---------------------------------------------------------
   Future<void> _loadData() async {
-    setState(() => _loading = true);
-    try {
-      final rawList =
-      await ApiService.fetchAllInstallmentsSummary(page: 0, size: 2000);
-
-      final now = DateTime.now();
-      final today = DateTime(now.year, now.month, now.day);
-      final nextWeek = today.add(const Duration(days: 7));
-
-      final Map<int, PlayerReminder> overdueMap = {};
-      final Map<int, PlayerReminder> upcomingMap = {};
-
-      for (var item in rawList) {
-        if (item.playerId == null || item.dueDate == null) continue;
-
-        final st = (item.status ?? '').toUpperCase();
-        if (st == 'PAID') continue;
-
-        final remaining = (item.remaining ?? 0).toDouble();
-        if (remaining <= 0) continue;
-
-        final dueDate = item.dueDate!;
-        bool isOverdue = dueDate.isBefore(today);
-        bool isUpcoming = !isOverdue && dueDate.isBefore(nextWeek);
-
-        if (!isOverdue && !isUpcoming) continue;
-
-        final targetMap = isOverdue ? overdueMap : upcomingMap;
-
-        if (targetMap.containsKey(item.playerId)) {
-          final existing = targetMap[item.playerId]!;
-          final existingOldest = existing.oldestDueDate;
-          final newOldest =
-          (existingOldest == null || dueDate.isBefore(existingOldest))
-              ? dueDate
-              : existingOldest;
-
-          targetMap[item.playerId!] = PlayerReminder(
-            playerId: existing.playerId,
-            playerName: existing.playerName,
-            phone: existing.phone ?? item.phone,
-            totalDue: existing.totalDue + remaining,
-            count: existing.count + 1,
-            oldestDueDate: newOldest,
-          );
-        } else {
-          targetMap[item.playerId!] = PlayerReminder(
-            playerId: item.playerId!,
-            playerName: item.playerName ?? 'Unknown',
-            phone: item.phone,
-            totalDue: remaining,
-            count: 1,
-            oldestDueDate: dueDate,
-          );
-        }
-      }
-
+    // 1. Load from Cache (Instant)
+    final cachedData = await DataManager().getCachedAllInstallments();
+    if (cachedData != null && cachedData.isNotEmpty) {
       if (mounted) {
         setState(() {
-          _overdueList = overdueMap.values.toList();
-          _upcomingList = upcomingMap.values.toList();
+          _processData(cachedData);
           _loading = false;
         });
       }
-    } catch (e, st) {
-      debugPrint("Error loading reminders: $e\n$st");
-      if (mounted) setState(() => _loading = false);
-      _showSnack('Failed to load reminders', isError: true);
+    } else {
+      if (mounted) setState(() => _loading = true);
     }
+
+    // 2. Fetch Fresh Data (Background)
+    try {
+      final freshList = await ApiService.fetchAllInstallmentsSummary(page: 0, size: 5000);
+      await DataManager().saveAllInstallments(freshList);
+
+      if (mounted) {
+        setState(() {
+          _processData(freshList);
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error loading reminders: $e");
+      if (mounted && _overdueList.isEmpty && _upcomingList.isEmpty) {
+        setState(() => _loading = false);
+        _showSnack('Failed to load reminders', isError: true);
+      }
+    }
+  }
+
+  void _processData(List<PlayerInstallmentSummary> rawList) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final nextWeek = today.add(const Duration(days: 7));
+
+    final Map<int, PlayerReminder> overdueMap = {};
+    final Map<int, PlayerReminder> upcomingMap = {};
+
+    for (var item in rawList) {
+      if (item.playerId == null || item.dueDate == null) continue;
+
+      final st = (item.status ?? '').toUpperCase();
+      if (st == 'PAID') continue;
+
+      final remaining = (item.remaining ?? 0).toDouble();
+      if (remaining <= 0) continue;
+
+      final dueDate = item.dueDate!;
+      bool isOverdue = dueDate.isBefore(today);
+      bool isUpcoming = !isOverdue && dueDate.isBefore(nextWeek);
+
+      if (!isOverdue && !isUpcoming) continue;
+
+      final targetMap = isOverdue ? overdueMap : upcomingMap;
+
+      if (targetMap.containsKey(item.playerId)) {
+        final existing = targetMap[item.playerId]!;
+        final existingOldest = existing.oldestDueDate;
+        final newOldest = (existingOldest == null || dueDate.isBefore(existingOldest)) ? dueDate : existingOldest;
+
+        targetMap[item.playerId!] = PlayerReminder(
+          playerId: existing.playerId,
+          playerName: existing.playerName,
+          phone: existing.phone ?? item.phone,
+          totalDue: existing.totalDue + remaining,
+          count: existing.count + 1,
+          oldestDueDate: newOldest,
+        );
+      } else {
+        targetMap[item.playerId!] = PlayerReminder(
+          playerId: item.playerId!,
+          playerName: item.playerName,
+          phone: item.phone,
+          totalDue: remaining,
+          count: 1,
+          oldestDueDate: dueDate,
+        );
+      }
+    }
+
+    _overdueList = overdueMap.values.toList();
+    _upcomingList = upcomingMap.values.toList();
   }
 
   String _normalizePhone(String raw) {
@@ -139,8 +158,7 @@ class _SmsReminderScreenState extends State<SmsReminderScreen> {
 
     setState(() => _sending = true);
 
-    final bool isAndroid =
-        !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+    final bool isAndroid = !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
     final encoded = Uri.encodeComponent(message);
     final String urlString = isAndroid
         ? 'whatsapp://send?phone=$phone&text=$encoded'
@@ -249,38 +267,15 @@ class _SmsReminderScreenState extends State<SmsReminderScreen> {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      color: color,
-                    ),
-                  ),
+                  Text(title, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: color)),
                   const SizedBox(height: 4),
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.grey.shade600,
-                    ),
-                  ),
+                  Text(subtitle, style: TextStyle(fontSize: 14, color: Colors.grey.shade600)),
                 ],
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  '$count',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: color,
-                  ),
-                ),
+                decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+                child: Text('$count', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: color)),
               ),
             ],
           ),
@@ -299,11 +294,7 @@ class _SmsReminderScreenState extends State<SmsReminderScreen> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 20,
-            offset: const Offset(0, 4),
-          ),
+          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 20, offset: const Offset(0, 4)),
         ],
       ),
       child: Material(
@@ -313,43 +304,17 @@ class _SmsReminderScreenState extends State<SmsReminderScreen> {
           onTap: () {
             showModalBottomSheet(
               context: context,
-              shape: const RoundedRectangleBorder(
-                borderRadius: BorderRadius.vertical(
-                  top: Radius.circular(24),
-                ),
-              ),
+              shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
               builder: (ctx) => SafeArea(
                 child: Padding(
                   padding: const EdgeInsets.all(20),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Container(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        height: 4,
-                        width: 40,
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade300,
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                      Text(
-                        'Send Reminder to ${p.playerName}',
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
+                      Container(margin: const EdgeInsets.only(bottom: 12), height: 4, width: 40, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2))),
+                      Text('Send Reminder to ${p.playerName}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
                       const SizedBox(height: 16),
-                      Text(
-                        message,
-                        style: TextStyle(
-                          fontSize: 15,
-                          color: Colors.grey.shade700,
-                          height: 1.4,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
+                      Text(message, style: TextStyle(fontSize: 15, color: Colors.grey.shade700, height: 1.4), textAlign: TextAlign.center),
                       const SizedBox(height: 24),
                       Row(
                         children: [
@@ -358,14 +323,7 @@ class _SmsReminderScreenState extends State<SmsReminderScreen> {
                               onPressed: _sending ? null : () => _sendWhatsApp(p, message),
                               icon: const FaIcon(FontAwesomeIcons.whatsapp, size: 18),
                               label: const Text('WhatsApp'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.green.shade600,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(vertical: 16),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                              ),
+                              style: ElevatedButton.styleFrom(backgroundColor: Colors.green.shade600, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -374,14 +332,7 @@ class _SmsReminderScreenState extends State<SmsReminderScreen> {
                               onPressed: _sending ? null : () => _sendSms(p, message),
                               icon: const Icon(Icons.sms, size: 18),
                               label: const Text('SMS'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.blue.shade600,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(vertical: 16),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                              ),
+                              style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade600, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
                             ),
                           ),
                         ],
@@ -401,108 +352,41 @@ class _SmsReminderScreenState extends State<SmsReminderScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Container(
-                      height: 48,
-                      width: 48,
+                      height: 48, width: 48,
                       decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            color,
-                            color.withOpacity(0.7),
-                          ],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
+                        gradient: LinearGradient(colors: [color, color.withOpacity(0.7)], begin: Alignment.topLeft, end: Alignment.bottomRight),
                         borderRadius: BorderRadius.circular(14),
                       ),
-                      child: Center(
-                        child: Text(
-                          p.playerName.isNotEmpty ? p.playerName[0].toUpperCase() : '?',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
+                      child: Center(child: Text(p.playerName.isNotEmpty ? p.playerName[0].toUpperCase() : '?', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800))),
                     ),
                     const SizedBox(width: 16),
-
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            p.playerName,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.blueGrey,
-                            ),
-                          ),
+                          Text(p.playerName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.blueGrey)),
                           const SizedBox(height: 4),
-                          if (p.phone != null && p.phone!.isNotEmpty)
-                            Text(
-                              p.phone!,
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: Colors.grey.shade600,
-                              ),
-                            ),
+                          if (p.phone != null && p.phone!.isNotEmpty) Text(p.phone!, style: TextStyle(fontSize: 14, color: Colors.grey.shade600)),
                           const SizedBox(height: 8),
                           Row(
                             children: [
-                              Icon(
-                                isOverdue ? Icons.warning : Icons.schedule,
-                                size: 16,
-                                color: color,
-                              ),
+                              Icon(isOverdue ? Icons.warning : Icons.schedule, size: 16, color: color),
                               const SizedBox(width: 6),
-                              Expanded(
-                                child: Text(
-                                  '₹${p.totalDue.toInt()} • ${p.count} installment${p.count > 1 ? 's' : ''}',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w600,
-                                    color: color,
-                                  ),
-                                ),
-                              ),
+                              Expanded(child: Text('₹${p.totalDue.toInt()} • ${p.count} installment${p.count > 1 ? 's' : ''}', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: color))),
                             ],
                           ),
-                          if (p.oldestDueDate != null) ...[
-                            const SizedBox(height: 4),
-                            Text(
-                              'Oldest due: ${p.oldestDueDate!.toLocal().toString().split(' ')[0]}',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey.shade500,
-                              ),
-                            ),
-                          ],
+                          if (p.oldestDueDate != null) ...[const SizedBox(height: 4), Text('Oldest due: ${p.oldestDueDate!.toLocal().toString().split(' ')[0]}', style: TextStyle(fontSize: 12, color: Colors.grey.shade500))],
                         ],
                       ),
                     ),
-
                     Container(
-                      height: 40,
-                      width: 40,
-                      decoration: BoxDecoration(
-                        color: color.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: IconButton(
-                        onPressed: () {},
-                        icon: const Icon(Icons.send),
-                        iconSize: 18,
-                        color: color,
-                        padding: EdgeInsets.zero,
-                      ),
+                      height: 40, width: 40,
+                      decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+                      child: IconButton(onPressed: () {}, icon: const Icon(Icons.send), iconSize: 18, color: color, padding: EdgeInsets.zero),
                     ),
                   ],
                 ),
-
                 const SizedBox(height: 12),
-
                 Row(
                   children: [
                     Expanded(
@@ -510,13 +394,7 @@ class _SmsReminderScreenState extends State<SmsReminderScreen> {
                         onPressed: _sending ? null : () => _sendWhatsApp(p, message),
                         icon: const FaIcon(FontAwesomeIcons.whatsapp, size: 16),
                         label: const Text('WhatsApp'),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          side: BorderSide(color: Colors.green.shade300),
-                        ),
+                        style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 10), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), side: BorderSide(color: Colors.green.shade300)),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -525,13 +403,7 @@ class _SmsReminderScreenState extends State<SmsReminderScreen> {
                         onPressed: _sending ? null : () => _sendSms(p, message),
                         icon: const Icon(Icons.sms, size: 16),
                         label: const Text('SMS'),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          side: BorderSide(color: Colors.blue.shade300),
-                        ),
+                        style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 10), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), side: BorderSide(color: Colors.blue.shade300)),
                       ),
                     ),
                   ],
@@ -552,46 +424,18 @@ class _SmsReminderScreenState extends State<SmsReminderScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              height: 160,
-              width: 160,
+              height: 160, width: 160,
               decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    Colors.deepPurple.shade50,
-                    Colors.deepPurple.shade100.withOpacity(0.8),
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
+                gradient: LinearGradient(colors: [Colors.deepPurple.shade50, Colors.deepPurple.shade100.withOpacity(0.8)], begin: Alignment.topLeft, end: Alignment.bottomRight),
                 shape: BoxShape.circle,
                 border: Border.all(color: Colors.deepPurple.shade100, width: 2),
               ),
-              child: Icon(
-                Icons.notifications_off,
-                size: 70,
-                color: Colors.deepPurple.shade400,
-              ),
+              child: Icon(Icons.notifications_off, size: 70, color: Colors.deepPurple.shade400),
             ),
             const SizedBox(height: 32),
-            const Text(
-              'No Reminders Needed',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.w800,
-                color: Colors.grey,
-                letterSpacing: -0.5,
-              ),
-            ),
+            const Text('No Reminders Needed', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: Colors.grey, letterSpacing: -0.5)),
             const SizedBox(height: 12),
-            const Text(
-              'Great! All payments are up to date.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 15,
-                color: Colors.grey,
-                height: 1.4,
-              ),
-            ),
+            const Text('Great! All payments are up to date.', textAlign: TextAlign.center, style: TextStyle(fontSize: 15, color: Colors.grey, height: 1.4)),
           ],
         ),
       ),
@@ -602,80 +446,33 @@ class _SmsReminderScreenState extends State<SmsReminderScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFD),
+      appBar: AppBar(
+        title: const Text('Send Reminders', style: TextStyle(fontWeight: FontWeight.w800, color: Colors.white)),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        foregroundColor: Colors.white,
+        flexibleSpace: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Colors.deepPurple.shade600, Colors.purple.shade600],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(30), bottomRight: Radius.circular(30)),
+          ),
+        ),
+        // ✅ Explicit Back Button
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ),
       body: Column(
         children: [
-          // AppBar-like header
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  Colors.deepPurple.shade600,
-                  Colors.purple.shade600,
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: const BorderRadius.only(
-                bottomLeft: Radius.circular(30),
-                bottomRight: Radius.circular(30),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Send Reminders',
-                          style: TextStyle(
-                            fontSize: 28,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.white,
-                            letterSpacing: -0.5,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Send payment reminders via WhatsApp or SMS',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.white.withOpacity(0.9),
-                          ),
-                        ),
-                      ],
-                    ),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: const Icon(
-                        Icons.notifications_active,
-                        size: 28,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-
           // Main Content
           Expanded(
             child: _loading
-                ? Center(
-              child: CircularProgressIndicator(
-                color: Colors.deepPurple.shade600,
-                strokeWidth: 2.5,
-              ),
-            )
+                ? Center(child: CircularProgressIndicator(color: Colors.deepPurple.shade600, strokeWidth: 2.5))
                 : _overdueList.isEmpty && _upcomingList.isEmpty
                 ? _buildEmptyState()
                 : RefreshIndicator(
@@ -683,32 +480,18 @@ class _SmsReminderScreenState extends State<SmsReminderScreen> {
               color: Colors.deepPurple.shade600,
               backgroundColor: Colors.white,
               child: ListView(
-                padding: const EdgeInsets.only(bottom: 24),
+                padding: const EdgeInsets.only(top: 24, bottom: 24),
                 physics: const AlwaysScrollableScrollPhysics(),
                 children: [
-                  // Overdue Section
                   if (_overdueList.isNotEmpty) ...[
-                    _buildSectionHeader(
-                      'Overdue Payments',
-                      'Immediate action required',
-                      Colors.red.shade600,
-                      _overdueList.length,
-                    ),
+                    _buildSectionHeader('Overdue Payments', 'Immediate action required', Colors.red.shade600, _overdueList.length),
                     ..._overdueList.map((p) => _buildPlayerCard(p, true)),
                   ],
-
-                  // Upcoming Section
                   if (_upcomingList.isNotEmpty) ...[
                     const SizedBox(height: 24),
-                    _buildSectionHeader(
-                      'Upcoming Payments',
-                      'Due within 7 days',
-                      Colors.blue.shade600,
-                      _upcomingList.length,
-                    ),
+                    _buildSectionHeader('Upcoming Payments', 'Due within 7 days', Colors.blue.shade600, _upcomingList.length),
                     ..._upcomingList.map((p) => _buildPlayerCard(p, false)),
                   ],
-
                   const SizedBox(height: 80),
                 ],
               ),
@@ -722,14 +505,9 @@ class _SmsReminderScreenState extends State<SmsReminderScreen> {
         backgroundColor: Colors.deepPurple.shade600,
         foregroundColor: Colors.white,
         elevation: 4,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         icon: const Icon(Icons.refresh, size: 24),
-        label: const Text(
-          'Refresh',
-          style: TextStyle(fontWeight: FontWeight.w600),
-        ),
+        label: const Text('Refresh', style: TextStyle(fontWeight: FontWeight.w600)),
       )
           : null,
     );

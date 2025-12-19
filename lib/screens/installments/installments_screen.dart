@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../models/player.dart';
 import '../../models/installment.dart';
-import '../../services/api_service.dart';
+import '../../services/api_service.dart'; // Still needed for specific non-cached actions
+import '../../services/data_manager.dart'; // ✅ Import DataManager
 import '../payments/payment_list_screen.dart';
 import 'package:textewidget/screens/payments/record_payment_screen.dart';
 import 'create_installment_screen.dart';
@@ -22,19 +23,56 @@ class InstallmentsScreen extends StatefulWidget {
 }
 
 class _InstallmentsScreenState extends State<InstallmentsScreen> {
-  late Future<List<Installment>> _futureInstallments;
+  // Replace Future with List
+  List<Installment> _installments = [];
+  bool _isLoading = true;
+  String? _error;
+
   final df = DateFormat('dd MMM yyyy');
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _loadData();
   }
 
-  void _load() {
-    setState(() {
-      _futureInstallments = ApiService.fetchInstallmentsByPlayer(widget.player.id);
-    });
+  // ---------------------------------------------------------
+  // 🚀 OPTIMIZED LOAD LOGIC
+  // ---------------------------------------------------------
+  Future<void> _loadData() async {
+    // 1. Try RAM Cache First (Instant)
+    final cached = await DataManager().getInstallmentsForPlayer(widget.player.id);
+
+    if (cached.isNotEmpty) {
+      if (mounted) {
+        setState(() {
+          _installments = cached;
+          _isLoading = false;
+        });
+      }
+    } else {
+      if (mounted) setState(() => _isLoading = true);
+    }
+
+    // 2. Fetch Fresh Data (Background)
+    try {
+      final freshData = await DataManager().getInstallmentsForPlayer(widget.player.id, forceRefresh: true);
+
+      if (mounted) {
+        setState(() {
+          _installments = freshData;
+          _isLoading = false;
+          _error = null;
+        });
+      }
+    } catch (e) {
+      if (mounted && _installments.isEmpty) {
+        setState(() {
+          _isLoading = false;
+          _error = e.toString();
+        });
+      }
+    }
   }
 
   Future<void> _openCreate() async {
@@ -42,7 +80,11 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
       context,
       MaterialPageRoute(builder: (_) => CreateInstallmentScreen(player: widget.player)),
     );
-    if (created == true) _load();
+    if (created == true) {
+      // Invalidate cache so we get fresh data next time
+      DataManager().invalidatePlayerDetails(widget.player.id);
+      _loadData();
+    }
   }
 
   @override
@@ -69,7 +111,10 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
         backgroundColor: Colors.white,
         foregroundColor: Colors.black87,
         centerTitle: false,
-        // --- ADDED BUTTON HERE (Top Right) ---
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.pop(context),
+        ),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 8.0),
@@ -81,54 +126,51 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
           ),
         ],
       ),
-      body: FutureBuilder<List<Installment>>(
-        future: _futureInstallments,
-        builder: (context, snap) {
-          if (snap.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snap.hasError) {
-            return Center(child: Text('Error: ${snap.error}'));
-          }
-
-          final list = snap.data ?? [];
-          if (list.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.history_edu, size: 64, color: Colors.grey.shade300),
-                  const SizedBox(height: 16),
-                  Text(
-                    'No installments recorded yet.',
-                    style: TextStyle(color: Colors.grey.shade600, fontSize: 16),
-                  ),
-                  const SizedBox(height: 24),
-                  // Optional: Call to action button for empty state
-                  OutlinedButton.icon(
-                    onPressed: _openCreate,
-                    icon: const Icon(Icons.add),
-                    label: const Text("Create First Installment"),
-                  )
-                ],
-              ),
-            );
-          }
-
-          return RefreshIndicator(
-            onRefresh: () async {
-              _load();
-              await _futureInstallments;
-            },
-            child: ListView.builder(
-              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
-              itemCount: list.length,
-              itemBuilder: (context, i) {
-                return _buildInstallmentCard(list[i]);
-              },
+      // Removed FutureBuilder, using direct ListView with _isLoading check
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator(color: Colors.deepPurple))
+          : _error != null
+          ? Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, color: Colors.red, size: 40),
+            const SizedBox(height: 10),
+            Text('Error: $_error'),
+            const SizedBox(height: 10),
+            ElevatedButton(onPressed: _loadData, child: const Text("Retry")),
+          ],
+        ),
+      )
+          : _installments.isEmpty
+          ? Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.history_edu, size: 64, color: Colors.grey.shade300),
+            const SizedBox(height: 16),
+            Text(
+              'No installments recorded yet.',
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 16),
             ),
-          );
-        },
+            const SizedBox(height: 24),
+            OutlinedButton.icon(
+              onPressed: _openCreate,
+              icon: const Icon(Icons.add),
+              label: const Text("Create First Installment"),
+            )
+          ],
+        ),
+      )
+          : RefreshIndicator(
+        onRefresh: _loadData,
+        child: ListView.builder(
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+          itemCount: _installments.length,
+          itemBuilder: (context, i) {
+            return _buildInstallmentCard(_installments[i]);
+          },
+        ),
       ),
     );
   }
@@ -140,7 +182,6 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
     final bool isPaid = remaining <= 0;
     final bool isOverdue = !isPaid && it.dueDate != null && it.dueDate!.isBefore(DateTime.now());
 
-    // Status Determination
     String statusText = (it.status ?? 'PENDING').replaceAll('_', ' ');
     Color statusColor = Colors.blue;
     Color statusBg = Colors.blue.shade50;
@@ -173,7 +214,6 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
             offset: const Offset(0, 4),
           )
         ],
-        // Left accent border based on status
         border: Border(left: BorderSide(color: statusColor, width: 4)),
       ),
       child: Padding(
@@ -181,17 +221,12 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // --- Header: Month & Status Badge ---
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
                   periodLabel,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black87,
-                  ),
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
                 ),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -202,19 +237,12 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
                   ),
                   child: Text(
                     statusText,
-                    style: TextStyle(
-                      color: statusColor,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 11,
-                    ),
+                    style: TextStyle(color: statusColor, fontWeight: FontWeight.w700, fontSize: 11),
                   ),
                 ),
               ],
             ),
-
             const SizedBox(height: 16),
-
-            // --- Amount Details ---
             Row(
               children: [
                 Expanded(
@@ -223,10 +251,7 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
                     children: [
                       const Text('Total Amount', style: TextStyle(fontSize: 12, color: Colors.grey)),
                       const SizedBox(height: 4),
-                      Text(
-                        '₹${total.toStringAsFixed(0)}',
-                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                      ),
+                      Text('₹${total.toStringAsFixed(0)}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                     ],
                   ),
                 ),
@@ -238,11 +263,7 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
                       const SizedBox(height: 4),
                       Text(
                         '₹${paid.toStringAsFixed(0)}',
-                        style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.green.shade700
-                        ),
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.green.shade700),
                       ),
                     ],
                   ),
@@ -255,24 +276,16 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
                       const SizedBox(height: 4),
                       Text(
                         it.dueDate != null ? df.format(it.dueDate!) : '—',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                          color: isOverdue ? Colors.red : Colors.black87,
-                        ),
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: isOverdue ? Colors.red : Colors.black87),
                       ),
                     ],
                   ),
                 ),
               ],
             ),
-
             const SizedBox(height: 20),
-
-            // --- Action Buttons ---
             Row(
               children: [
-                // 1. View History Button
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: () {
@@ -296,14 +309,11 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
                     label: const Text('Payments'),
                   ),
                 ),
-
                 const SizedBox(width: 12),
-
-                // 2. Record Payment Button (Primary)
                 Expanded(
                   child: ElevatedButton.icon(
                     onPressed: isPaid
-                        ? null // Disabled if fully paid
+                        ? null
                         : () async {
                       final result = await Navigator.push<bool>(
                         context,
@@ -314,7 +324,11 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
                           ),
                         ),
                       );
-                      if (result == true) _load();
+                      if (result == true) {
+                        // Invalidate cache so we see new payment
+                        DataManager().invalidatePlayerDetails(widget.player.id);
+                        _loadData();
+                      }
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.deepPurple,

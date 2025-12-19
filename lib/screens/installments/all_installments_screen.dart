@@ -3,7 +3,7 @@ import 'package:intl/intl.dart';
 import '../../models/player.dart';
 import '../../models/player_installment_summary.dart';
 import '../../services/api_service.dart';
-import '../../services/data_manager.dart';
+import '../../services/data_manager.dart'; // Ensure DataManager is imported
 import '../../utils/event_bus.dart';
 import '../payments/payment_list_screen.dart';
 import 'installments_screen.dart';
@@ -58,23 +58,36 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
       final now = DateTime.now();
       _selectedMonth = DateTime(now.year, now.month + 1, 1);
     }
-    _loadFromCache();
-    _loadAllData();
+    _loadAllData(); // Calls the optimized loader
   }
 
-  Future<void> _loadFromCache() async {
-    final cached = await DataManager().getCachedAllInstallments();
-    if (cached != null && cached.isNotEmpty && mounted) {
-      setState(() => _allItems = cached);
-    }
-  }
-
+  // -------------------------------------------------------------
+  // 🚀 OPTIMIZED LOAD LOGIC (RAM First -> Then Network)
+  // -------------------------------------------------------------
   Future<void> _loadAllData() async {
-    if (_allItems.isEmpty) setState(() => _isLoading = true);
+    // 1. Try loading from RAM/Disk Cache first (Instant)
+    final cachedData = await DataManager().getCachedAllInstallments();
+
+    if (cachedData != null && cachedData.isNotEmpty) {
+      if (mounted) {
+        setState(() {
+          _allItems = cachedData;
+          _isLoading = false; // Show data immediately
+        });
+      }
+    } else {
+      // Only show spinner if absolutely no data in cache
+      if (mounted) setState(() => _isLoading = true);
+    }
+
+    // 2. Fetch Fresh Data from API (Background)
     try {
       final List<PlayerInstallmentSummary> list =
       await ApiService.fetchAllInstallmentsSummary(page: 0, size: 2000);
+
+      // Update Cache
       await DataManager().saveAllInstallments(list);
+
       if (mounted) {
         setState(() {
           _allItems = list;
@@ -83,7 +96,13 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
         });
       }
     } catch (e) {
-      if (mounted) setState(() { _isLoading = false; _error = e.toString(); });
+      // Only show error if we have NO data (neither cache nor api)
+      if (mounted && _allItems.isEmpty) {
+        setState(() { _isLoading = false; _error = e.toString(); });
+      } else {
+        // If we have cached data, just log the error silently (user still sees old data)
+        debugPrint("Background fetch failed: $e");
+      }
     }
   }
 
@@ -128,7 +147,10 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
         });
       },
     );
-    if (picked != null) setState(() => _selectedMonth = picked);
+    if (picked != null) {
+      setState(() => _selectedMonth = picked);
+      // No need to reload data, just filtering locally
+    }
   }
 
   // --- 1. EXTEND DATE LOGIC ---
@@ -231,7 +253,6 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
 
     if (isPaid) {
       headerLabel = "Paid On";
-      // Use lastPaymentDate if available, else fall back
       headerDate = inst.lastPaymentDate != null
           ? df.format(inst.lastPaymentDate!)
           : (inst.dueDate != null ? df.format(inst.dueDate!) : 'Completed');
@@ -270,13 +291,12 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
                   title: const Text("View / Pay This Installment"),
                   onTap: () {
                     Navigator.pop(ctx);
-                    // Navigate to payments just for this installment
                     Navigator.push(
                         context,
                         MaterialPageRoute(
                             builder: (_) => PaymentsListScreen(
                                 installmentId: inst.installmentId!,
-                                remainingAmount: inst.remaining)));
+                                remainingAmount: inst.remaining))).then((_) => _loadAllData());
                   },
                 ),
               ],
@@ -286,7 +306,7 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
     );
   }
 
-// AllInstallmentsScreen मध्ये
+  // --- 3. PAY DIALOG ---
   Future<void> _showPayDialog(PlayerConsolidatedSummary player) async {
     final amountCtl = TextEditingController(text: player.totalRemaining.toStringAsFixed(0));
     bool paying = false;
@@ -301,7 +321,7 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Text(
-                  'This payment will be allocated to all unpaid installments (overdue + pending + future).',
+                  'This payment will be allocated to all unpaid installments.',
                   style: TextStyle(fontSize: 12, color: Colors.grey),
                 ),
                 const SizedBox(height: 16),
@@ -329,7 +349,6 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
                   setDialogState(() => paying = true);
 
                   try {
-                    // ✅ payUnpaid वापरा (सर्व unpaid installments)
                     await ApiService.payUnpaid(
                       playerId: player.playerId,
                       amount: amt,
@@ -356,11 +375,7 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
                   }
                 },
                 child: paying
-                    ? const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                     : const Text('Pay Now'),
               ),
             ],
