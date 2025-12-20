@@ -1,10 +1,10 @@
-// lib/widgets/dashboard_stats.dart
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../models/player_installment_summary.dart';
 import '../screens/home/home_screen.dart';
-import '../screens/installments/overdue_players_screen.dart';
+// ✅ Make sure this file exists!
+import '../screens/installments/OverduePlayersScreen.dart';
 import '../services/api_service.dart';
 import '../services/data_manager.dart';
 import '../utils/event_bus.dart';
@@ -16,15 +16,13 @@ class DashboardStats extends StatefulWidget {
   DashboardStatsState createState() => DashboardStatsState();
 }
 
-class DashboardStatsState extends State<DashboardStats>
-    with TickerProviderStateMixin {
+class DashboardStatsState extends State<DashboardStats> with TickerProviderStateMixin {
   int _totalPlayers = 0;
   int _currentMonthDue = 0;
   int _upcomingCount = 0;
-  int _overdueCount = 0; // Changed from _overdue
-  double _overdueAmount = 0.0; // NEW: Store overdue amount
+  double _overdueAmount = 0.0;
   bool _loading = true;
-  int _overduePlayers = 0; // Renamed from _overdueCount to be clear
+  int _overduePlayers = 0;
 
   late StreamSubscription<PlayerEvent> _playerEventsSubscription;
 
@@ -46,6 +44,7 @@ class DashboardStatsState extends State<DashboardStats>
 
     _loadFromCache();
     _loadStats();
+
     _playerEventsSubscription = EventBus().stream.listen((event) {
       if ([
         'added',
@@ -55,9 +54,9 @@ class DashboardStatsState extends State<DashboardStats>
         'installment_deleted',
         'payment_recorded',
         'installment_updated',
-        'overdue_paid', // ADD THIS NEW EVENT
+        'overdue_paid',
       ].contains(event.action)) {
-        _loadStats(); // This will refresh the dashboard
+        _loadStats();
       }
     });
   }
@@ -80,7 +79,7 @@ class DashboardStatsState extends State<DashboardStats>
           _totalPlayers = cachedPlayers?.length ?? 0;
           _currentMonthDue = stats['due']!;
           _upcomingCount = stats['upcoming']!;
-          _overduePlayers = stats['overduePlayers']!; // Updated
+          _overduePlayers = stats['overduePlayers']!;
           _overdueAmount = stats['overdueAmount']!;
           _loading = false;
         });
@@ -107,7 +106,7 @@ class DashboardStatsState extends State<DashboardStats>
           _totalPlayers = players.length;
           _currentMonthDue = stats['due']!;
           _upcomingCount = stats['upcoming']!;
-          _overduePlayers = stats['overduePlayers']!; // Updated
+          _overduePlayers = stats['overduePlayers']!;
           _overdueAmount = stats['overdueAmount']!;
           _loading = false;
         });
@@ -121,13 +120,7 @@ class DashboardStatsState extends State<DashboardStats>
     }
   }
 
-// ENHANCED OVERDUE CALCULATION - COUNT PLAYERS, NOT INSTALLMENTS
-  static Map<String, dynamic> _calculateStats(
-      List<PlayerInstallmentSummary> rows) {
-    int dueThisMonthCount = 0;
-    int upcomingCount = 0;
-
-    // Track unique players for each category
+  static Map<String, dynamic> _calculateStats(List<PlayerInstallmentSummary> rows) {
     Set<int> playersWithThisMonthDue = {};
     Set<int> playersWithUpcoming = {};
     Set<int> playersWithOverdue = {};
@@ -137,7 +130,6 @@ class DashboardStatsState extends State<DashboardStats>
     final now = DateTime.now();
     final startOfToday = DateTime(now.year, now.month, now.day);
 
-    // Group by player first for better calculation
     final Map<int, List<PlayerInstallmentSummary>> playersMap = {};
     for (final r in rows) {
       if (r.playerId != null) {
@@ -145,7 +137,6 @@ class DashboardStatsState extends State<DashboardStats>
       }
     }
 
-    // Calculate stats per player
     playersMap.forEach((playerId, playerRows) {
       bool playerHasThisMonthDue = false;
       bool playerHasUpcoming = false;
@@ -158,31 +149,22 @@ class DashboardStatsState extends State<DashboardStats>
 
         if (r.dueDate == null) continue;
 
-        // 1. OVERDUE: ALL PAST UNPAID INSTALLMENTS
         if (r.dueDate!.isBefore(startOfToday) && !isPaid) {
           playerHasOverdue = true;
-
           final totalAmount = r.installmentAmount ?? 0.0;
-          final paidAmount = r.totalPaid ?? 0.0;
+          final paidAmount = r.totalPaid;
           final remaining = totalAmount - paidAmount;
-
           if (remaining > 0) {
             playerOverdueAmount += remaining;
           }
         }
 
-        // 2. THIS MONTH DUE: Current month installments that are not paid
-        if (r.dueDate!.year == now.year &&
-            r.dueDate!.month == now.month &&
-            !isPaid) {
+        if (r.dueDate!.year == now.year && r.dueDate!.month == now.month && !isPaid) {
           playerHasThisMonthDue = true;
         }
 
-        // 3. UPCOMING: Next month installments that are not paid
         final nextMonthDate = DateTime(now.year, now.month + 1, 1);
-        if (r.dueDate!.year == nextMonthDate.year &&
-            r.dueDate!.month == nextMonthDate.month &&
-            !isPaid) {
+        if (r.dueDate!.year == nextMonthDate.year && r.dueDate!.month == nextMonthDate.month && !isPaid) {
           playerHasUpcoming = true;
         }
       }
@@ -201,13 +183,9 @@ class DashboardStatsState extends State<DashboardStats>
 
     return {
       'due': playersWithThisMonthDue.length,
-      // Players with due this month
       'upcoming': playersWithUpcoming.length,
-      // Players with upcoming
       'overduePlayers': playersWithOverdue.length,
-      // Players with overdue (NOT installments)
       'overdueAmount': overdueAmount,
-      // Total overdue amount
     };
   }
 
@@ -246,7 +224,6 @@ class DashboardStatsState extends State<DashboardStats>
     );
   }
 
-// FIXED CODE for the _statCard widget:
   Widget _statCard({
     required String title,
     required int value,
@@ -284,8 +261,7 @@ class DashboardStatsState extends State<DashboardStats>
               onTap: onTap,
               borderRadius: BorderRadius.circular(16),
               child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 child: Row(
                   children: [
                     Container(
@@ -311,7 +287,6 @@ class DashboardStatsState extends State<DashboardStats>
                         mainAxisAlignment: MainAxisAlignment.center,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          // Count with animation
                           FittedBox(
                             fit: BoxFit.scaleDown,
                             alignment: Alignment.centerLeft,
@@ -324,30 +299,27 @@ class DashboardStatsState extends State<DashboardStats>
                               ),
                             ),
                           ),
-
-                          // Amount display logic - FIXED SYNTAX
                           if (amountValue != null)
                             FittedBox(
                               fit: BoxFit.scaleDown,
                               alignment: Alignment.centerLeft,
                               child: amountValue > 0
                                   ? _animatedAmount(
-                                      amountValue,
-                                      const TextStyle(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w600,
-                                        color: Colors.white70,
-                                      ),
-                                    )
-                                  : Text(
-                                      '₹0',
-                                      style: const TextStyle(
-                                        fontSize: 14,
-                                        color: Colors.white70,
-                                      ),
-                                    ),
+                                amountValue,
+                                const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white70,
+                                ),
+                              )
+                                  : const Text(
+                                '₹0',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.white70,
+                                ),
+                              ),
                             ),
-
                           const SizedBox(height: 2),
                           Text(
                             title,
@@ -393,9 +365,6 @@ class DashboardStatsState extends State<DashboardStats>
       );
     }
 
-    final now = DateTime.now();
-    final currentMonth = '${now.year}-${now.month.toString().padLeft(2, '0')}';
-
     final configs = [
       {
         'title': 'Total Players',
@@ -409,7 +378,6 @@ class DashboardStatsState extends State<DashboardStats>
           MaterialPageRoute(builder: (_) => const HomeScreen()),
         ),
       },
-
       {
         'title': 'This Month Due',
         'value': _currentMonthDue,
@@ -418,10 +386,10 @@ class DashboardStatsState extends State<DashboardStats>
         'gradient': [Colors.orange.shade400, Colors.orange.shade200],
         'accent': Colors.orange.shade50,
         'onTap': () => Navigator.pushNamed(
-              context,
-              '/all-installments',
-              arguments: {'filter': 'Due (Month)'},
-            ),
+          context,
+          '/all-installments',
+          arguments: {'filter': 'Due (Month)'},
+        ),
       },
       {
         'title': 'Upcoming',
@@ -435,11 +403,7 @@ class DashboardStatsState extends State<DashboardStats>
           '/all-installments',
           arguments: {'filter': 'Upcoming'},
         ),
-
-
       },
-      // In the build method's configs list:
-      // In DashboardStats widget, update the overdue card:
       {
         'title': 'Overdue',
         'value': _overduePlayers,
@@ -447,11 +411,12 @@ class DashboardStatsState extends State<DashboardStats>
         'icon': Icons.warning,
         'gradient': [Colors.purple.shade400, Colors.purple.shade200],
         'accent': Colors.purple.shade50,
+        // ✅ Corrected Navigation to OverduePlayersScreen
         'onTap': _overduePlayers > 0
             ? () => Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => OverduePlayersScreen(),
+            builder: (_) => const OverduePlayersScreen(),
           ),
         )
             : null,
@@ -468,13 +433,10 @@ class DashboardStatsState extends State<DashboardStats>
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-
       children: [
-        const SizedBox(height: 16),
         const Text(
           'Quick Stats',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black),
         ),
         const SizedBox(height: 12),
         SizedBox(
