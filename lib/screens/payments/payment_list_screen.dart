@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import '../../models/payment.dart';
-import '../../services/api_service.dart';
+import '../../services/api_service.dart'; // Keep for specific actions if needed
+import '../../services/data_manager.dart'; // ✅ Import DataManager
 import 'record_payment_screen.dart';
 
 class PaymentsListScreen extends StatefulWidget {
@@ -31,13 +32,34 @@ class _PaymentsListScreenState extends State<PaymentsListScreen> {
     _load();
   }
 
+  // ---------------------------------------------------------
+  // 🚀 OPTIMIZED LOAD LOGIC
+  // ---------------------------------------------------------
   Future<void> _load() async {
-    setState(() => _loading = true);
-    try {
-      final list = await ApiService.fetchPaymentsByInstallment(widget.installmentId);
-      if (mounted) setState(() => _payments = list);
-    } catch (e) {
+    // 1. Try Cache First (Instant)
+    final cached = await DataManager().getPayments(widget.installmentId);
+    if (cached.isNotEmpty) {
       if (mounted) {
+        setState(() {
+          _payments = cached;
+          _loading = false;
+        });
+      }
+    } else {
+      if (mounted) setState(() => _loading = true);
+    }
+
+    // 2. Fetch Fresh Data (Background)
+    try {
+      final freshList = await DataManager().getPayments(widget.installmentId, forceRefresh: true);
+      if (mounted) {
+        setState(() {
+          _payments = freshList;
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted && _payments.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Failed to load: $e'),
@@ -45,8 +67,6 @@ class _PaymentsListScreenState extends State<PaymentsListScreen> {
           ),
         );
       }
-    } finally {
-      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -59,7 +79,11 @@ class _PaymentsListScreenState extends State<PaymentsListScreen> {
         ),
       ),
     );
-    if (didCreate == true) _load();
+    if (didCreate == true) {
+      // Invalidate cache so we get the new payment
+      DataManager().invalidatePayments(widget.installmentId);
+      _load();
+    }
   }
 
   void _copyToClipboard(String text, [String? successText]) {
@@ -159,21 +183,6 @@ class _PaymentsListScreenState extends State<PaymentsListScreen> {
               ),
             ),
             const SizedBox(height: 32),
-            /*ElevatedButton.icon(
-              onPressed: _openRecord,
-              icon: Icon(Icons.add_circle_outline, size: 20),
-              label: const Text('Record First Payment'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.deepPurple.shade600,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                elevation: 0,
-                shadowColor: Colors.deepPurple.shade300,
-              ),
-            ),*/
           ],
         ),
       ),
@@ -497,7 +506,8 @@ class _PaymentsListScreenState extends State<PaymentsListScreen> {
     final totalPaid = _payments.fold<double>(0, (sum, payment) => sum + (payment.amount ?? 0));
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      // ✅ FIX: Added 100px top padding to accommodate Status Bar + AppBar
+      padding: const EdgeInsets.only(top: 100, left: 24, right: 24, bottom: 24),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
@@ -624,6 +634,11 @@ class _PaymentsListScreenState extends State<PaymentsListScreen> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         foregroundColor: Colors.white,
+        // ✅ Explicit Back Button
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.pop(context),
+        ),
         actions: [
           IconButton(
             onPressed: _load,

@@ -2,78 +2,244 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:hive/hive.dart';
+import '../models/fee_structure.dart';
+import '../models/group.dart';
 import '../models/player.dart';
 import '../models/player_installment_summary.dart';
-
+import 'api_service.dart'; // <--- Make sure to import this!
+import '../models/installment.dart'; // ✅ Make sure to import Installment model
+import '../models/payment.dart'; // ✅ Import Payment Model
 class DataManager {
   // Singleton
   static final DataManager _instance = DataManager._internal();
   factory DataManager() => _instance;
   DataManager._internal();
-
+// RAM Cache
+  List<Group>? _memGroups;
+  List<FeeStructure>? _memFees;
   static const String _boxName = 'app_cache';
-  final Box _box = Hive.box(_boxName);
+  late Box _box; // Marked as late, initialized in init()
 
   // RAM cache
   List<Player>? _memPlayers;
   Map<int, bool>? _memStatusMap;
-
+  final Map<int, List<Installment>> _memPlayerDetails = {};
   // NEW: RAM cache for all-installments
   List<PlayerInstallmentSummary>? _memAllInstallments;
+  // ✅ ADDED: The missing init() method
 
-  /// Returns cached players/status if available (RAM -> Hive)
+  // ✅ NEW: Cache for Payments List (Key: InstallmentId, Value: List of Payments)
+  final Map<int, List<Payment>> _memPayments = {};
+  Future<void> init() async {
+    if (!Hive.isBoxOpen(_boxName)) {
+      _box = await Hive.openBox(_boxName);
+    } else {
+      _box = Hive.box(_boxName);
+    }
+  }
+
   ({List<Player>? players, Map<int, bool>? status}) getCachedData() {
-    // 1) RAM
     if (_memPlayers != null && _memPlayers!.isNotEmpty) {
       return (players: _memPlayers, status: _memStatusMap);
     }
-
-    // 2) Hive
     try {
       if (_box.containsKey('players_data')) {
         final playersJson = jsonDecode(_box.get('players_data') as String) as List<dynamic>;
         final players = playersJson.map((e) => Player.fromJson(e as Map<String, dynamic>)).toList();
-
-        Map<int, bool> statusMap = {};
-        if (_box.containsKey('status_data')) {
-          final statusJson = jsonDecode(_box.get('status_data') as String) as Map<String, dynamic>;
-          statusMap = statusJson.map((k, v) => MapEntry(int.parse(k), v as bool));
-        }
-
         _memPlayers = players;
-        _memStatusMap = statusMap;
-        return (players: players, status: statusMap);
+
+        // Load status if needed
+        return (players: players, status: _memStatusMap);
       }
     } catch (e) {
-      // ignore and fallback to null (cache might be corrupt)
-      debugPrint('DataManager.getCachedData error: $e');
+      debugPrint('Cache error: $e');
     }
-
-    // 3) nothing
     return (players: null, status: null);
   }
+// 1. GET GROUPS (Instant)
+  Future<List<Group>> getGroups({bool forceRefresh = false}) async {
+    if (!forceRefresh && _memGroups != null && _memGroups!.isNotEmpty) return _memGroups!;
 
+    // Try Disk
+    if (!forceRefresh && _box.containsKey('groups_data')) {
+      // ... (Add disk logic if you want strict persistence, or rely on API fallback)
+    }
+
+    try {
+      final data = await ApiService.fetchGroups();
+      _memGroups = data;
+      // Optional: Save to Hive _box.put(...)
+      return data;
+    } catch (e) {
+      return _memGroups ?? [];
+    }
+  }
+
+  // 2. GET FEES (Instant)
+  Future<List<FeeStructure>> getFees({bool forceRefresh = false}) async {
+    if (!forceRefresh && _memFees != null && _memFees!.isNotEmpty) return _memFees!;
+
+    try {
+      final data = await ApiService.fetchAllFees(); // Ensure ApiService has this method
+      _memFees = data;
+      return data;
+    } catch (e) {
+      return _memFees ?? [];
+    }
+  }
+
+  // Clear cache to force refresh next time
+  void invalidateFees() { _memFees = null; }
+  void invalidateGroups() { _memGroups = null; }
+  // ==========================================
+  // ✅ NEW: Get Payments (Instant Cache)
+  // ==========================================
+  Future<List<Payment>> getPayments(int installmentId, {bool forceRefresh = false}) async {
+    // 1. Return RAM if available
+    if (!forceRefresh && _memPayments.containsKey(installmentId)) {
+      return _memPayments[installmentId]!;
+    }
+
+    // 2. Fetch from API
+    try {
+      final data = await ApiService.fetchPaymentsByInstallment(installmentId);
+      _memPayments[installmentId] = data; // Save to RAM
+      return data;
+    } catch (e) {
+      debugPrint("Error fetching payments: $e");
+      return _memPayments[installmentId] ?? [];
+    }
+  }
+
+  // Call this when adding a new payment to clear old data
+  void invalidatePayments(int installmentId) {
+    _memPayments.remove(installmentId);
+  }
+// ✅ PRE-FETCH: Loads data in background
+// ... inside DataManager class
+
+  Future<void> prefetchAllData() async {
+    try {
+      debugPrint("🚀 DataManager: Starting pre-fetch...");
+
+      // Fetch EVERYTHING in parallel
+      final results = await Future.wait([
+        ApiService.fetchPlayers(),
+        ApiService.fetchAllInstallmentsSummary(page: 0, size: 5000),
+        ApiService.fetchGroups(), // Add Groups
+        ApiService.fetchAllFees(), // Add Fees
+      ]);
+
+      // Process and Cache
+      final players = results[0] as List<Player>;
+      final installments = results[1] as List<PlayerInstallmentSummary>;
+      final groups = results[2] as List<Group>;
+      final fees = results[3] as List<FeeStructure>;
+
+      await saveData(players, []);
+      await saveAllInstallments(installments);
+
+      // Manually cache groups and fees to memory
+      _memGroups = groups;
+      _memFees = fees;
+
+      debugPrint("🚀 DataManager: Pre-fetch complete. App is ready.");
+    } catch (e) {
+      debugPrint("⚠️ DataManager: Pre-fetch failed ($e). App will load data lazily.");
+    }
+  }
+  // ==========================================
+  // ✅ FIXED: Missing 'getPlayers' Method
+  // ==========================================
+  Future<List<Player>> getPlayers({bool forceRefresh = false}) async {
+    // 1. Return RAM if available
+    if (!forceRefresh && _memPlayers != null && _memPlayers!.isNotEmpty) {
+      return _memPlayers!;
+    }
+
+    // 2. Return Disk if available
+    if (!forceRefresh) {
+      final cached = getCachedData();
+      if (cached.players != null && cached.players!.isNotEmpty) {
+        return cached.players!;
+      }
+    }
+
+    // 3. Fetch from API
+    try {
+      final players = await ApiService.fetchPlayers();
+      await saveData(players, []); // Save to cache
+      return players;
+    } catch (e) {
+      debugPrint("Error fetching players: $e");
+      // Fallback to cache even if forceRefresh was true
+      return _memPlayers ?? [];
+    }
+  }
+// ==========================================
+  // ✅ NEW: Get Specific Player History (Fast)
+  // ==========================================
+  Future<List<Installment>> getInstallmentsForPlayer(int playerId, {bool forceRefresh = false}) async {
+    // 1. Return RAM if available
+    if (!forceRefresh && _memPlayerDetails.containsKey(playerId)) {
+      return _memPlayerDetails[playerId]!;
+    }
+
+    // 2. Fetch from API
+    try {
+      final data = await ApiService.fetchInstallmentsByPlayer(playerId);
+      _memPlayerDetails[playerId] = data; // Save to RAM
+      return data;
+    } catch (e) {
+      debugPrint("Error fetching details for player $playerId: $e");
+      // Return cached version if API fails
+      return _memPlayerDetails[playerId] ?? [];
+    }
+  }
+
+  // Clear specific player cache (call this after adding/editing installment)
+  void invalidatePlayerDetails(int playerId) {
+    _memPlayerDetails.remove(playerId);
+  }
+  // ==========================================
+  // ✅ FIXED: Missing 'getAllInstallments' Method
+  // ==========================================
+  Future<List<PlayerInstallmentSummary>> getAllInstallments({bool forceRefresh = false}) async {
+    // 1. Return RAM if available
+    if (!forceRefresh && _memAllInstallments != null && _memAllInstallments!.isNotEmpty) {
+      return _memAllInstallments!;
+    }
+
+    // 2. Return Disk if available
+    if (!forceRefresh) {
+      final cached = await getCachedAllInstallments();
+      if (cached != null && cached.isNotEmpty) {
+        return cached;
+      }
+    }
+
+    // 3. Fetch from API
+    try {
+      final items = await ApiService.fetchAllInstallmentsSummary(page: 0, size: 5000);
+      await saveAllInstallments(items); // Save to cache
+      return items;
+    } catch (e) {
+      debugPrint("Error fetching installments: $e");
+      return _memAllInstallments ?? [];
+    }
+  }
   /// Save players and statuses to RAM + Hive (stores JSON strings)
   Future<void> saveData(List<Player> players, List<dynamic> statuses) async {
     // RAM
     _memPlayers = players;
     _memStatusMap = { for (final s in statuses) s.playerId as int : s.hasInstallments as bool };
-
-    // Disk (store JSON encoded)
     try {
       final playersJson = jsonEncode(players.map((p) => p.toJson()).toList());
-      final statusMap = _memStatusMap ?? <int, bool>{};
-      // convert keys to string for json
-      final statusStringKeyMap = statusMap.map((k, v) => MapEntry(k.toString(), v));
-      final statusJson = jsonEncode(statusStringKeyMap);
-
       await _box.put('players_data', playersJson);
-      await _box.put('status_data', statusJson);
     } catch (e) {
-      debugPrint('DataManager.saveData error: $e');
+      debugPrint('Save error: $e');
     }
   }
-
   /// Remove a single player by id from RAM and Hive cache (good for delete)
   Future<void> removePlayer(int id) async {
     // RAM
@@ -114,53 +280,34 @@ class DataManager {
     await _box.clear();
   }
   Future<List<PlayerInstallmentSummary>?> getCachedAllInstallments() async {
-    // 1. Try RAM (Instant)
     if (_memAllInstallments != null && _memAllInstallments!.isNotEmpty) {
       return _memAllInstallments;
     }
-
-    // 2. Try Disk (Hive) with Background Decoding
     try {
       if (_box.containsKey('all_installments_cache')) {
         final jsonStr = _box.get('all_installments_cache') as String;
-
-        // HEAVY LIFTING: Run JSON decoding in a separate thread
         final items = await compute(_parseCachedInstallments, jsonStr);
-
         _memAllInstallments = items;
         return items;
       }
     } catch (e) {
-      debugPrint('DataManager.getCachedAllInstallments error: $e');
+      debugPrint('Installment Cache error: $e');
     }
-
     return null;
   }
-
-  // Standalone function for compute (must be static or outside class)
   static List<PlayerInstallmentSummary> _parseCachedInstallments(String jsonStr) {
     final List<dynamic> list = jsonDecode(jsonStr) as List<dynamic>;
-    return list.map((e) {
-      if (e is Map<String, dynamic>) {
-        return PlayerInstallmentSummary.fromJson(e);
-      } else if (e is Map) {
-        return PlayerInstallmentSummary.fromJson(Map<String, dynamic>.from(e));
-      }
-      throw Exception('Invalid item in cache');
-    }).toList();
+    return list.map((e) => PlayerInstallmentSummary.fromJson(e)).toList();
   }
-
   Future<void> saveAllInstallments(List<PlayerInstallmentSummary> items) async {
     _memAllInstallments = items;
     try {
-      // Also optimize saving if possible, but reading is the priority for load time
       final jsonStr = await compute(_encodeInstallments, items);
       await _box.put('all_installments_cache', jsonStr);
     } catch (e) {
-      debugPrint('DataManager.saveAllInstallments error: $e');
+      debugPrint('Save Installments error: $e');
     }
   }
-
   static String _encodeInstallments(List<PlayerInstallmentSummary> items) {
     return jsonEncode(items.map((e) => e.toJson()).toList());
   }

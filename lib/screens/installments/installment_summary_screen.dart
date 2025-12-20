@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../services/api_service.dart';
+import '../../services/data_manager.dart'; // Ensure DataManager is imported
 import '../../models/player_installment_summary.dart';
 import '../payments/payment_list_screen.dart';
 
@@ -39,36 +40,78 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
     }
     _filter = widget.initialFilter ?? 'all';
     _load();
-  }Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    try {
-      List<PlayerInstallmentSummary> list = await ApiService.fetchAllInstallmentsSummary();
+  }
 
-      // Filter by due date month when not in 'overdue' filter
-      if (_filter != 'overdue') {
-        final parts = _selectedMonth.split('-');
-        final selectedYear = int.parse(parts[0]);
-        final selectedMonth = int.parse(parts[1]);
-
-        list = list.where((item) {
-          if (item.dueDate == null) return false;
-          return item.dueDate!.year == selectedYear && item.dueDate!.month == selectedMonth;
-        }).toList();
+  // ---------------------------------------------------------
+  // 🚀 OPTIMIZED LOAD LOGIC (RAM -> Display -> Network Refresh)
+  // ---------------------------------------------------------
+  Future<void> _load() async {
+    // 1. Try Cache First (Instant Load)
+    final cachedData = await DataManager().getCachedAllInstallments();
+    if (cachedData != null && cachedData.isNotEmpty) {
+      if (mounted) {
+        setState(() {
+          _processAndDisplay(cachedData);
+          _loading = false; // Show cached data immediately
+        });
       }
+    } else {
+      if (mounted) setState(() => _loading = true); // Only spinner if cache empty
+    }
 
-      final filtered = _applyFilter(list);
-      _calculateStats(filtered);
+    // 2. Fetch Fresh Data (Background)
+    try {
+      final freshList = await ApiService.fetchAllInstallmentsSummary(page: 0, size: 5000);
+      await DataManager().saveAllInstallments(freshList);
 
-      if (mounted) setState(() => _items = filtered);
+      if (mounted) {
+        setState(() {
+          _processAndDisplay(freshList);
+          _loading = false;
+          _error = null;
+        });
+      }
     } catch (e) {
-      if (mounted) setState(() => _error = e.toString());
-    } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && _items.isEmpty) {
+        setState(() {
+          _loading = false;
+          _error = e.toString();
+        });
+      }
     }
   }
+
+  // Unified Logic to Filter & Calculate Stats
+  void _processAndDisplay(List<PlayerInstallmentSummary> allData) {
+    List<PlayerInstallmentSummary> filteredList = allData;
+
+    // Filter by Date (unless 'overdue' filter which shows all overdue regardless of month)
+    if (_filter != 'overdue') {
+      final parts = _selectedMonth.split('-');
+      final selYear = int.parse(parts[0]);
+      final selMonth = int.parse(parts[1]);
+
+      filteredList = allData.where((item) {
+        // Priority: Check Due Date
+        if (item.dueDate != null) {
+          return item.dueDate!.year == selYear && item.dueDate!.month == selMonth;
+        }
+        // Fallback: Check Billing Month if Due Date missing
+        // Using try-catch if model fields vary, or safe logic
+        // Assuming your model logic aligns with backend summary
+        return false;
+      }).toList();
+    }
+
+    // Apply Status Filter
+    final finalItems = _applyFilter(filteredList);
+
+    // Update Stats
+    _calculateStats(finalItems);
+
+    _items = finalItems;
+  }
+
   void _calculateStats(List<PlayerInstallmentSummary> items) {
     _totalAmount = 0;
     _totalPaid = 0;
@@ -104,17 +147,12 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
 
     switch (_filter) {
       case 'pending':
-        return list.where((p) {
-          final s = _normStatus(p.status);
-          return s == 'PENDING';
-        }).toList();
-
+        return list.where((p) => _normStatus(p.status) == 'PENDING').toList();
       case 'due':
         return list.where((p) {
           final s = _normStatus(p.status);
           return s == 'PENDING' || s == 'PARTIALLY PAID';
         }).toList();
-
       case 'overdue':
         return list.where((p) {
           final s = _normStatus(p.status);
@@ -122,7 +160,6 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
           final dueDate = p.dueDate;
           return !isPaid && dueDate != null && dueDate.isBefore(startOfToday);
         }).toList();
-
       case 'all':
       default:
         return list;
@@ -165,29 +202,15 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          "Year",
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            color: Colors.grey.shade700,
-                          ),
-                        ),
+                        Text("Year", style: TextStyle(fontWeight: FontWeight.w600, color: Colors.grey.shade700)),
                         DropdownButton<int>(
                           value: tempYear,
                           underline: const SizedBox(),
                           items: List.generate(11, (index) {
                             final y = now.year - 5 + index;
-                            return DropdownMenuItem(
-                              value: y,
-                              child: Text(
-                                y.toString(),
-                                style: const TextStyle(fontWeight: FontWeight.w600),
-                              ),
-                            );
+                            return DropdownMenuItem(value: y, child: Text(y.toString(), style: const TextStyle(fontWeight: FontWeight.w600)));
                           }).toList(),
-                          onChanged: (val) {
-                            if (val != null) setDialogState(() => tempYear = val);
-                          },
+                          onChanged: (val) { if (val != null) setDialogState(() => tempYear = val); },
                           borderRadius: BorderRadius.circular(12),
                           style: TextStyle(color: Colors.grey.shade800),
                         ),
@@ -207,30 +230,16 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          "Month",
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            color: Colors.grey.shade700,
-                          ),
-                        ),
+                        Text("Month", style: TextStyle(fontWeight: FontWeight.w600, color: Colors.grey.shade700)),
                         DropdownButton<int>(
                           value: tempMonth,
                           underline: const SizedBox(),
                           items: List.generate(12, (index) {
                             final m = index + 1;
                             final name = DateFormat.MMMM().format(DateTime(2024, m));
-                            return DropdownMenuItem(
-                              value: m,
-                              child: Text(
-                                name,
-                                style: const TextStyle(fontWeight: FontWeight.w600),
-                              ),
-                            );
+                            return DropdownMenuItem(value: m, child: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)));
                           }).toList(),
-                          onChanged: (val) {
-                            if (val != null) setDialogState(() => tempMonth = val);
-                          },
+                          onChanged: (val) { if (val != null) setDialogState(() => tempMonth = val); },
                           borderRadius: BorderRadius.circular(12),
                           style: TextStyle(color: Colors.grey.shade800),
                         ),
@@ -242,30 +251,22 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: Text(
-                    "Cancel",
-                    style: TextStyle(color: Colors.grey.shade600),
-                  ),
+                  child: Text("Cancel", style: TextStyle(color: Colors.grey.shade600)),
                 ),
                 ElevatedButton(
                   onPressed: () {
                     final newMonthStr = '$tempYear-${tempMonth.toString().padLeft(2, '0')}';
-                    setState(() {
-                      _selectedMonth = newMonthStr;
+                    setState(() => _selectedMonth = newMonthStr);
+                    // Instant Local Refresh from Cache
+                    DataManager().getCachedAllInstallments().then((list) {
+                      if (list != null) setState(() => _processAndDisplay(list));
                     });
-                    _load();
                     Navigator.pop(context);
+                    // Background Network Refresh
+                    _load();
                   },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.deepPurple.shade600,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: const Text(
-                    "Select",
-                    style: TextStyle(color: Colors.white),
-                  ),
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple.shade600, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                  child: const Text("Select", style: TextStyle(color: Colors.white)),
                 ),
               ],
             );
@@ -285,13 +286,10 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
             remainingAmount: row.remaining,
           ),
         ),
-      );
+      ).then((_) => _load()); // Refresh on return
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('No installment exists for this player.'),
-          backgroundColor: Colors.orange.shade600,
-        ),
+        SnackBar(content: const Text('No installment exists for this player.'), backgroundColor: Colors.orange.shade600),
       );
     }
   }
@@ -307,38 +305,17 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
       builder: (ctx) {
         return StatefulBuilder(builder: (ctx2, setStateDialog) {
           return AlertDialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20),
-            ),
-            title: Text(
-              'Create Installment',
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                color: Colors.grey.shade800,
-              ),
-            ),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: Text('Create Installment', style: TextStyle(fontWeight: FontWeight.w700, color: Colors.grey.shade800)),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  p.playerName,
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey.shade700,
-                  ),
-                ),
+                Text(p.playerName, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.grey.shade700)),
                 const SizedBox(height: 16),
                 TextField(
                   controller: amountCtl,
-                  keyboardType: TextInputType.numberWithOptions(decimal: true),
-                  decoration: InputDecoration(
-                    labelText: 'Amount',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    prefixIcon: const Icon(Icons.currency_rupee),
-                  ),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(labelText: 'Amount', border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)), prefixIcon: const Icon(Icons.currency_rupee)),
                 ),
                 const SizedBox(height: 16),
                 InkWell(
@@ -349,49 +326,17 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
                       firstDate: DateTime(year - 1),
                       lastDate: DateTime(year + 1),
                     );
-                    if (d != null) {
-                      due = d;
-                      setStateDialog(() {});
-                    }
+                    if (d != null) setStateDialog(() => due = d);
                   },
                   child: Container(
                     padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade50,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.grey.shade300),
-                    ),
+                    decoration: BoxDecoration(color: Colors.grey.shade50, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade300)),
                     child: Row(
                       children: [
-                        Icon(
-                          Icons.calendar_today,
-                          color: Colors.deepPurple.shade600,
-                        ),
+                        Icon(Icons.calendar_today, color: Colors.deepPurple.shade600),
                         const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Due Date',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey.shade600,
-                                ),
-                              ),
-                              Text(
-                                DateFormat.yMMMd().format(due),
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Icon(
-                          Icons.arrow_drop_down,
-                          color: Colors.grey.shade600,
-                        ),
+                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Due Date', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)), Text(DateFormat.yMMMd().format(due), style: const TextStyle(fontWeight: FontWeight.w600))])),
+                        Icon(Icons.arrow_drop_down, color: Colors.grey.shade600),
                       ],
                     ),
                   ),
@@ -399,25 +344,11 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
               ],
             ),
             actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx2, false),
-                child: Text(
-                  'Cancel',
-                  style: TextStyle(color: Colors.grey.shade600),
-                ),
-              ),
+              TextButton(onPressed: () => Navigator.pop(ctx2, false), child: Text('Cancel', style: TextStyle(color: Colors.grey.shade600))),
               ElevatedButton(
                 onPressed: () => Navigator.pop(ctx2, true),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.deepPurple.shade600,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: const Text(
-                  'Create',
-                  style: TextStyle(color: Colors.white),
-                ),
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple.shade600, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                child: const Text('Create', style: TextStyle(color: Colors.white)),
               ),
             ],
           );
@@ -426,7 +357,7 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
     );
 
     if (ok != true) return;
-    final amount = double.tryParse(amountCtl.text.trim()) ?? double.parse((p.installmentAmount ?? 500).toString());
+    final amount = double.tryParse(amountCtl.text.trim()) ?? 500.0;
 
     try {
       await ApiService.createInstallmentForPlayer(
@@ -436,20 +367,10 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
         dueDate: due,
         amount: amount,
       );
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Installment created successfully'),
-          backgroundColor: Colors.green.shade600,
-        ),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: const Text('Installment created successfully'), backgroundColor: Colors.green.shade600));
       await _load();
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Create failed: $e'),
-          backgroundColor: Colors.red.shade600,
-        ),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Create failed: $e'), backgroundColor: Colors.red.shade600));
     }
   }
 
@@ -461,25 +382,25 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
       onSelected: (selected) {
         if (selected) {
           setState(() => _filter = value);
-          _load();
+          // Instant refresh from RAM
+          DataManager().getCachedAllInstallments().then((list) {
+            if (list != null) setState(() => _processAndDisplay(list));
+          });
         }
       },
-      avatar: Icon(
-        icon,
-        size: 16,
-        color: isSelected ? Colors.white : Colors.grey.shade600,
-      ),
+      avatar: Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.grey.shade600),
       selectedColor: Colors.deepPurple.shade600,
       backgroundColor: Colors.grey.shade100,
-      labelStyle: TextStyle(
-        color: isSelected ? Colors.white : Colors.grey.shade700,
-        fontWeight: FontWeight.w600,
-      ),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
-      ),
+      labelStyle: TextStyle(color: isSelected ? Colors.white : Colors.grey.shade700, fontWeight: FontWeight.w600),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       showCheckmark: false,
     );
+  }
+
+  String _getMonthLabel() {
+    if (_filter == 'overdue') return 'Overdue Payments';
+    final parts = _selectedMonth.split('-');
+    return DateFormat.yMMMM().format(DateTime(int.parse(parts[0]), int.parse(parts[1])));
   }
 
   Widget _buildStatsCard() {
@@ -489,51 +410,20 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
       margin: const EdgeInsets.all(20),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            Colors.deepPurple.shade600,
-            Colors.purple.shade600,
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+        gradient: LinearGradient(colors: [Colors.deepPurple.shade600, Colors.purple.shade600], begin: Alignment.topLeft, end: Alignment.bottomRight),
         borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.deepPurple.shade300.withOpacity(0.3),
-            blurRadius: 20,
-            offset: const Offset(0, 10),
-          ),
-        ],
+        boxShadow: [BoxShadow(color: Colors.deepPurple.shade300.withOpacity(0.3), blurRadius: 20, offset: const Offset(0, 10))],
       ),
       child: Column(
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                _getMonthLabel(),
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                  color: Colors.white,
-                  letterSpacing: -0.5,
-                ),
-              ),
+              Text(_getMonthLabel(), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Colors.white, letterSpacing: -0.5)),
               Container(
                 padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  '$_totalCount',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: Colors.white,
-                  ),
-                ),
+                decoration: BoxDecoration(color: Colors.white.withOpacity(0.15), borderRadius: BorderRadius.circular(12)),
+                child: Text('$_totalCount', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Colors.white)),
               ),
             ],
           ),
@@ -541,50 +431,22 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _buildStatItem(
-                'Total Amount',
-                money.format(_totalAmount),
-                Icons.account_balance_wallet,
-              ),
-              _buildStatItem(
-                'Total Paid',
-                money.format(_totalPaid),
-                Icons.payment,
-                color: Colors.green.shade300,
-              ),
-              _buildStatItem(
-                'Pending',
-                money.format(_totalRemaining),
-                Icons.pending_actions,
-                color: Colors.orange.shade300,
-              ),
+              _buildStatItem('Total Amount', money.format(_totalAmount), Icons.account_balance_wallet),
+              _buildStatItem('Total Paid', money.format(_totalPaid), Icons.payment, color: Colors.green.shade300),
+              _buildStatItem('Pending', money.format(_totalRemaining), Icons.pending_actions, color: Colors.orange.shade300),
             ],
           ),
           if (_overdueCount > 0) ...[
             const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              decoration: BoxDecoration(
-                color: Colors.red.shade600.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.red.shade400.withOpacity(0.3)),
-              ),
+              decoration: BoxDecoration(color: Colors.red.shade600.withOpacity(0.2), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.red.shade400.withOpacity(0.3))),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(
-                    Icons.warning_amber,
-                    size: 16,
-                    color: Colors.red.shade300,
-                  ),
+                  Icon(Icons.warning_amber, size: 16, color: Colors.red.shade300),
                   const SizedBox(width: 8),
-                  Text(
-                    '$_overdueCount overdue payment${_overdueCount > 1 ? 's' : ''}',
-                    style: TextStyle(
-                      color: Colors.red.shade100,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+                  Text('$_overdueCount overdue payment${_overdueCount > 1 ? 's' : ''}', style: TextStyle(color: Colors.red.shade100, fontWeight: FontWeight.w600)),
                 ],
               ),
             ),
@@ -600,59 +462,27 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
       children: [
         Row(
           children: [
-            Icon(
-              icon,
-              size: 14,
-              color: color ?? Colors.white.withOpacity(0.8),
-            ),
+            Icon(icon, size: 14, color: color ?? Colors.white.withOpacity(0.8)),
             const SizedBox(width: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 11,
-                color: Colors.white.withOpacity(0.9),
-                fontWeight: FontWeight.w500,
-              ),
-            ),
+            Text(label, style: TextStyle(fontSize: 11, color: Colors.white.withOpacity(0.9), fontWeight: FontWeight.w500)),
           ],
         ),
         const SizedBox(height: 4),
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w800,
-            color: Colors.white,
-            letterSpacing: -0.3,
-          ),
-        ),
+        Text(value, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Colors.white, letterSpacing: -0.3)),
       ],
     );
-  }
-
-  String _getMonthLabel() {
-    if (_filter == 'overdue') return 'Overdue Payments';
-
-    final parts = _selectedMonth.split('-');
-    final y = int.tryParse(parts[0]) ?? DateTime.now().year;
-    final m = int.tryParse(parts[1]) ?? DateTime.now().month;
-    return DateFormat.yMMMM().format(DateTime(y, m));
   }
 
   Widget _buildPlayerCard(PlayerInstallmentSummary p) {
     final df = DateFormat('dd MMM yyyy');
     final money = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
-    String moneyStr(double? v) {
-      if (v == null) return '—';
-      return money.format(v);
-    }
+    String moneyStr(double? v) => v == null ? '—' : money.format(v);
 
     Color getStatusColor(String s) {
       switch (s) {
         case 'PAID': return Colors.green.shade600;
-        case 'PARTIALLY_PAID':
-        case 'PARTIALLY PAID': return Colors.orange.shade600;
+        case 'PARTIALLY_PAID': case 'PARTIALLY PAID': return Colors.orange.shade600;
         case 'PENDING': return Colors.blueGrey.shade600;
         case 'OVERDUE': return Colors.red.shade600;
         default: return Colors.redAccent.shade400;
@@ -673,13 +503,7 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 20,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 20, offset: const Offset(0, 4))],
       ),
       child: Material(
         color: Colors.transparent,
@@ -690,192 +514,67 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
             padding: const EdgeInsets.all(20),
             child: Column(
               children: [
-                // Top row: Avatar, name, and status
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Container(
-                      height: 48,
-                      width: 48,
+                      height: 48, width: 48,
                       decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            Colors.deepPurple.shade400,
-                            Colors.purple.shade400,
-                          ],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
+                        gradient: LinearGradient(colors: [Colors.deepPurple.shade400, Colors.purple.shade400], begin: Alignment.topLeft, end: Alignment.bottomRight),
                         borderRadius: BorderRadius.circular(14),
                       ),
-                      child: Center(
-                        child: Text(
-                          p.playerName.isNotEmpty ? p.playerName[0].toUpperCase() : '?',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
+                      child: Center(child: Text(p.playerName.isNotEmpty ? p.playerName[0].toUpperCase() : '?', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800))),
                     ),
                     const SizedBox(width: 16),
-
-                    // Player info
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            p.playerName,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.deepOrangeAccent,
-                            ),
-                          ),
+                          Text(p.playerName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.deepOrangeAccent)),
                           const SizedBox(height: 4),
-                          Text(
-                            p.groupName ?? 'No group',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Colors.grey.shade600,
-                            ),
-                          ),
+                          Text(p.groupName ?? 'No group', style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
                           const SizedBox(height: 4),
-                          if (p.phone != null && p.phone!.isNotEmpty)
-                            Text(
-                              p.phone!,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey.shade500,
-                              ),
-                            ),
+                          if (p.phone != null && p.phone!.isNotEmpty) Text(p.phone!, style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
                         ],
                       ),
                     ),
-
-                    // Status badge
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: statusColor.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: statusColor.withOpacity(0.3)),
-                      ),
-                      child: Text(
-                        displayStatus.replaceAll('_', ' '),
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: statusColor,
-                        ),
-                      ),
+                      decoration: BoxDecoration(color: statusColor.withOpacity(0.1), borderRadius: BorderRadius.circular(12), border: Border.all(color: statusColor.withOpacity(0.3))),
+                      child: Text(displayStatus.replaceAll('_', ' '), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: statusColor)),
                     ),
                   ],
                 ),
-
                 const SizedBox(height: 16),
-
-                // Due date and progress
                 Row(
                   children: [
-                    Icon(
-                      Icons.calendar_today,
-                      size: 16,
-                      color: Colors.grey.shade600,
-                    ),
+                    Icon(Icons.calendar_today, size: 16, color: Colors.grey.shade600),
                     const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Due: ${p.dueDate != null ? df.format(p.dueDate!) : 'Not set'}',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey.shade700,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    if (progress > 0)
-                      Text(
-                        '${(progress * 100).toStringAsFixed(0)}%',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: progress >= 1 ? Colors.green.shade600 : Colors.orange.shade600,
-                        ),
-                      ),
+                    Expanded(child: Text('Due: ${p.dueDate != null ? df.format(p.dueDate!) : 'Not set'}', style: TextStyle(fontSize: 14, color: Colors.grey.shade700, fontWeight: FontWeight.w600))),
+                    if (progress > 0) Text('${(progress * 100).toStringAsFixed(0)}%', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: progress >= 1 ? Colors.green.shade600 : Colors.orange.shade600)),
                   ],
                 ),
-
                 const SizedBox(height: 12),
-
-                // Progress bar
                 if (p.installmentAmount != null && p.installmentAmount! > 0)
-                  LinearProgressIndicator(
-                    value: progress.clamp(0.0, 1.0),
-                    backgroundColor: Colors.grey.shade200,
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      progress >= 1 ? Colors.green.shade400 : Colors.orange.shade400,
-                    ),
-                    borderRadius: BorderRadius.circular(4),
-                    minHeight: 6,
-                  ),
-
+                  LinearProgressIndicator(value: progress.clamp(0.0, 1.0), backgroundColor: Colors.grey.shade200, valueColor: AlwaysStoppedAnimation<Color>(progress >= 1 ? Colors.green.shade400 : Colors.orange.shade400), borderRadius: BorderRadius.circular(4), minHeight: 6),
                 const SizedBox(height: 16),
-
-                // Amount row
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    _buildAmountChip(
-                      'Total',
-                      moneyStr(p.installmentAmount),
-                      Icons.currency_rupee,
-                      Colors.blue.shade600,
-                    ),
-                    _buildAmountChip(
-                      'Paid',
-                      moneyStr(p.totalPaid),
-                      Icons.check_circle,
-                      Colors.green.shade600,
-                    ),
-                    _buildAmountChip(
-                      'Remaining',
-                      moneyStr(p.remaining),
-                      Icons.pending,
-                      Colors.orange.shade600,
-                    ),
+                    _buildAmountChip('Total', moneyStr(p.installmentAmount), Icons.currency_rupee, Colors.blue.shade600),
+                    _buildAmountChip('Paid', moneyStr(p.totalPaid), Icons.check_circle, Colors.green.shade600),
+                    _buildAmountChip('Remaining', moneyStr(p.remaining), Icons.pending, Colors.orange.shade600),
                   ],
                 ),
-
                 const SizedBox(height: 16),
-
-                // Action buttons
                 Row(
                   children: [
                     Expanded(
                       child: OutlinedButton.icon(
                         onPressed: () => _openPayments(p),
-                        icon: Icon(
-                          Icons.receipt_long,
-                          size: 18,
-                          color: Colors.grey.shade700,
-                        ),
-                        label: Text(
-                          p.installmentId == null ? 'No Payments' : 'View Payments',
-                          style: TextStyle(
-                            color: Colors.grey.shade700,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          side: BorderSide(color: Colors.grey.shade300),
-                        ),
+                        icon: Icon(Icons.receipt_long, size: 18, color: Colors.grey.shade700),
+                        label: Text(p.installmentId == null ? 'No Payments' : 'View Payments', style: TextStyle(color: Colors.grey.shade700, fontWeight: FontWeight.w600)),
+                        style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), side: BorderSide(color: Colors.grey.shade300)),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -884,15 +583,7 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
                         onPressed: () => _createInstallment(p),
                         icon: const Icon(Icons.add_circle, size: 18),
                         label: const Text('Create'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.deepPurple.shade600,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          elevation: 0,
-                        ),
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple.shade600, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), elevation: 0),
                       ),
                   ],
                 ),
@@ -907,42 +598,20 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
   Widget _buildAmountChip(String label, String value, IconData icon, Color color) {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.2)),
-      ),
+      decoration: BoxDecoration(color: color.withOpacity(0.08), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withOpacity(0.2))),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                icon,
-                size: 14,
-                color: color,
-              ),
+              Icon(icon, size: 14, color: color),
               const SizedBox(width: 4),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: color,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+              Text(label, style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w600)),
             ],
           ),
           const SizedBox(height: 4),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w800,
-              color: Colors.grey.shade800,
-            ),
-          ),
+          Text(value, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Colors.grey.shade800)),
         ],
       ),
     );
@@ -956,47 +625,24 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              height: 160,
-              width: 160,
+              height: 160, width: 160,
               decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    Colors.deepPurple.shade50,
-                    Colors.deepPurple.shade100.withOpacity(0.8),
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
+                gradient: LinearGradient(colors: [Colors.deepPurple.shade50, Colors.deepPurple.shade100.withOpacity(0.8)], begin: Alignment.topLeft, end: Alignment.bottomRight),
                 shape: BoxShape.circle,
                 border: Border.all(color: Colors.deepPurple.shade100, width: 2),
               ),
-              child: Icon(
-                Icons.people,
-                size: 70,
-                color: Colors.deepPurple.shade400,
-              ),
+              child: Icon(Icons.people, size: 70, color: Colors.deepPurple.shade400),
             ),
             const SizedBox(height: 32),
             Text(
               _filter == 'overdue' ? 'No Overdue Payments' : 'No Installments Found',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.w800,
-                color: Colors.grey.shade800,
-                letterSpacing: -0.5,
-              ),
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: Colors.grey.shade800, letterSpacing: -0.5),
             ),
             const SizedBox(height: 12),
             Text(
-              _filter == 'overdue'
-                  ? 'Great! All payments are up to date.'
-                  : 'No players found for the selected month and filter.',
+              _filter == 'overdue' ? 'Great! All payments are up to date.' : 'No players found for the selected month and filter.',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 15,
-                color: Colors.grey.shade600,
-                height: 1.4,
-              ),
+              style: TextStyle(fontSize: 15, color: Colors.grey.shade600, height: 1.4),
             ),
           ],
         ),
@@ -1008,13 +654,29 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFD),
+
+      // ✅ ADDED BACK BUTTON in AppBar
+      appBar: AppBar(
+        title: Text(_getMonthLabel()),
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black87,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.pop(context),
+        ),
+        actions: [
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
+        ],
+      ),
+
       body: Column(
         children: [
-          // Stats Card (only show when not loading and not overdue filter)
+          // Stats Card
           if (!_loading && _filter != 'overdue' && _items.isNotEmpty)
             _buildStatsCard(),
 
-          // Filter chips
+          // Filter Chips
           if (!_loading && _items.isNotEmpty)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
@@ -1034,55 +696,25 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
               ),
             ),
 
-          // Main content
+          // Main List Content
           Expanded(
             child: _loading
-                ? Center(
-              child: CircularProgressIndicator(
-                color: Colors.deepPurple.shade600,
-                strokeWidth: 2.5,
-              ),
-            )
+                ? Center(child: CircularProgressIndicator(color: Colors.deepPurple.shade600, strokeWidth: 2.5))
                 : _error != null
                 ? Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
-                    Icons.error_outline,
-                    size: 60,
-                    color: Colors.red.shade400,
-                  ),
+                  Icon(Icons.error_outline, size: 60, color: Colors.red.shade400),
                   const SizedBox(height: 16),
-                  Text(
-                    'Error Loading Data',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.grey.shade800,
-                    ),
-                  ),
+                  Text('Error Loading Data', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.grey.shade800)),
                   const SizedBox(height: 8),
-                  Text(
-                    _error!,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Colors.grey.shade600,
-                    ),
-                  ),
+                  Text(_error!, textAlign: TextAlign.center, style: TextStyle(color: Colors.grey.shade600)),
                   const SizedBox(height: 20),
                   ElevatedButton(
                     onPressed: _load,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.deepPurple.shade600,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Text(
-                      'Retry',
-                      style: TextStyle(color: Colors.white),
-                    ),
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple.shade600, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                    child: const Text('Retry', style: TextStyle(color: Colors.white)),
                   ),
                 ],
               ),
@@ -1093,15 +725,11 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
               onRefresh: _load,
               color: Colors.deepPurple.shade600,
               backgroundColor: Colors.white,
-              child: ListView(
+              child: ListView.builder( // OPTIMIZED: Use ListView.builder for performance
                 padding: const EdgeInsets.only(bottom: 24),
                 physics: const AlwaysScrollableScrollPhysics(),
-                children: [
-                  if (_filter != 'overdue')
-                    const SizedBox(height: 8),
-                  ..._items.map((player) => _buildPlayerCard(player)),
-                  const SizedBox(height: 80), // Space for scroll
-                ],
+                itemCount: _items.length,
+                itemBuilder: (ctx, i) => _buildPlayerCard(_items[i]),
               ),
             ),
           ),
@@ -1113,14 +741,9 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
         backgroundColor: Colors.deepPurple.shade600,
         foregroundColor: Colors.white,
         elevation: 4,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         icon: const Icon(Icons.calendar_today, size: 24),
-        label: const Text(
-          'Change Month',
-          style: TextStyle(fontWeight: FontWeight.w600),
-        ),
+        label: const Text('Change Month', style: TextStyle(fontWeight: FontWeight.w600)),
       )
           : null,
     );

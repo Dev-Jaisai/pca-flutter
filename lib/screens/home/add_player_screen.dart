@@ -1,4 +1,3 @@
-// lib/screens/home/add_player_screen.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -38,12 +37,22 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
     _loadGroupsAndFees();
   }
 
+  // ---------------------------------------------------------
+  // 🚀 OPTIMIZED LOAD LOGIC (Instant Render)
+  // ---------------------------------------------------------
   Future<void> _loadGroupsAndFees() async {
     setState(() => _loadingGroups = true);
     final box = Hive.box('app_cache');
 
-    // 1) Try Hive cache first
+    // 1. FAST: Load from Cache & Show Immediately
     try {
+      // Load Fees
+      final rawFees = box.get('fee_structures', defaultValue: <dynamic, dynamic>{});
+      if (rawFees is Map) {
+        _fees = rawFees.map((k, v) => MapEntry(k.toString(), (v as num).toDouble()));
+      }
+
+      // Load Groups
       final cachedGroups = box.get('groups_list', defaultValue: []);
       if (cachedGroups is List && cachedGroups.isNotEmpty) {
         final parsed = cachedGroups.map((json) {
@@ -51,54 +60,47 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
             if (json is Map<String, dynamic>) return Group.fromJson(json);
             if (json is Map) return Group.fromJson(Map<String, dynamic>.from(json));
             return null;
-          } catch (_) {
-            return null;
-          }
+          } catch (_) { return null; }
         }).whereType<Group>().toList();
 
         if (parsed.isNotEmpty) {
+          if (mounted) {
+            setState(() {
+              _groups = parsed;
+              _validateSelection();
+              _loadingGroups = false; // ✅ STOP SPINNER HERE (Instant)
+            });
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Cache load error: $e');
+    }
+
+    // 2. SLOW: Fetch Fresh Data in Background
+    try {
+      final apiGroups = await ApiService.fetchGroups();
+      if (apiGroups.isNotEmpty) {
+        // Save to Hive for next time
+        try {
+          final groupsJson = apiGroups.map((g) => g.toJson()).toList();
+          await box.put('groups_list', groupsJson);
+        } catch (e) { debugPrint('Hive save error: $e'); }
+
+        if (mounted) {
           setState(() {
-            _groups = parsed;
-            _validateSelection(); // Safe check
+            _groups = apiGroups;
+            _validateSelection();
+            _loadingGroups = false; // Ensure spinner stops if cache was empty
           });
         }
       }
     } catch (e) {
-      debugPrint('AddPlayerScreen: failed to read cached groups: $e');
-    }
-
-    // 2) Try API for latest groups
-    try {
-      final apiGroups = await ApiService.fetchGroups();
-      if (apiGroups.isNotEmpty) {
-        setState(() {
-          _groups = apiGroups;
-          _validateSelection(); // Safe check after API update
-        });
-
-        try {
-          final groupsJson = apiGroups.map((g) => g.toJson()).toList();
-          await box.put('groups_list', groupsJson);
-        } catch (e) {
-          debugPrint('AddPlayerScreen: failed to save groups to Hive: $e');
-        }
+      debugPrint('API Error: $e');
+      if (mounted && _groups.isEmpty) {
+        setState(() => _loadingGroups = false); // Stop spinner on error
       }
-    } catch (e) {
-      debugPrint('Failed to load groups from API: $e');
     }
-
-    // 3) Load fees
-    try {
-      final raw = box.get('fee_structures', defaultValue: <dynamic, dynamic>{});
-      if (raw is Map) {
-        final map = raw.map((k, v) => MapEntry(k.toString(), (v as num).toDouble()));
-        setState(() => _fees = map);
-      }
-    } catch (e) {
-      debugPrint('AddPlayerScreen: failed to load fees: $e');
-    }
-
-    if (mounted) setState(() => _loadingGroups = false);
   }
 
   // Ensure _selectedGroupId is valid for the current _groups list
@@ -150,7 +152,6 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
 
   double? _selectedGroupFee() {
     if (_selectedGroupId == null) return null;
-    // Find group safely
     try {
       final g = _groups.firstWhere((e) => e.id == _selectedGroupId);
       return _fees[g.name];
@@ -189,12 +190,10 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
       );
 
       final int playerId = createdPlayer.id;
-
-      // Determine amount
       final double? fee = _selectedGroupFee();
+      final due = _installmentDueDate!;
 
       // 2) Create installment
-      final due = _installmentDueDate!;
       await ApiService.createInstallment(
         playerId: playerId,
         periodMonth: due.month,
@@ -234,17 +233,12 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
     const cardRadius = 16.0;
     final df = DateFormat('dd MMM yyyy');
 
-    // -----------------------------------------------------------
-    // SAFETY CHECK: Ensure the selected ID actually exists in the list
-    // This prevents the "There should be exactly one item..." crash
-    // -----------------------------------------------------------
     int? effectiveGroupId;
     if (_groups.isNotEmpty) {
       if (_selectedGroupId != null && _groups.any((g) => g.id == _selectedGroupId)) {
         effectiveGroupId = _selectedGroupId;
       } else {
         effectiveGroupId = _groups.first.id;
-        // We update the state variable too so the logic stays in sync
         _selectedGroupId = effectiveGroupId;
       }
     } else {
@@ -260,9 +254,16 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
         elevation: 0,
         foregroundColor: Colors.black87,
         title: const Text('Add Player', style: TextStyle(fontWeight: FontWeight.w700)),
+        // Explicit back button just in case
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.pop(context),
+        ),
       ),
       body: SafeArea(
-        child: _isLoading || _loadingGroups
+        child: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : (_loadingGroups && _groups.isEmpty) // Show spinner only if no cache AND loading
             ? const Center(child: CircularProgressIndicator())
             : SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
@@ -295,8 +296,7 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
                         children: const [
                           Text('New Player', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                           SizedBox(height: 6),
-                          Text('Add player details and set first installment due date',
-                              style: TextStyle(color: Colors.black54)),
+                          Text('Add player details and set first installment due date', style: TextStyle(color: Colors.black54)),
                         ],
                       ),
                     )
@@ -354,7 +354,7 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: DropdownButtonFormField<int>(
-                            value: effectiveGroupId, // <-- Use SAFE value here
+                            value: effectiveGroupId,
                             decoration: const InputDecoration(border: InputBorder.none, labelText: 'Group'),
                             items: _groups.map((g) => DropdownMenuItem<int>(
                               value: g.id,

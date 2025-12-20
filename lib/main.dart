@@ -1,10 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-// ... other imports ...
-import 'package:textewidget/screens/installments/all_installments_screen.dart';
-import 'package:textewidget/screens/installments/all_players_installments_screen.dart';
-import 'package:textewidget/screens/installments/overdue_players_screen.dart';
-import 'package:textewidget/screens/reminders/sms_reminder_screen.dart';
+
+// --- Screen Imports ---
 import 'screens/splash/splash_screen.dart';
 import 'screens/landing/intro_landing_screen.dart';
 import 'screens/landing/landing_screen.dart';
@@ -14,7 +11,11 @@ import 'screens/groups/group_list_screen.dart';
 import 'screens/fees/fee_list_screen.dart';
 import 'screens/payments/payment_list_screen.dart';
 import 'screens/installments/installment_summary_screen.dart';
-
+import 'screens/installments/all_installments_screen.dart';
+import 'screens/installments/all_players_installments_screen.dart';
+import 'screens/installments/overdue_players_screen.dart';
+import 'screens/reminders/sms_reminder_screen.dart';
+import 'screens/landing/landing_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Hive.initFlutter();
@@ -34,19 +35,28 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
+      // Start with the Intro Screen
       initialRoute: '/',
+
       routes: {
         '/': (ctx) => const SplashScreen(),
+
+        // This is your Intro Screen
         '/intro': (ctx) => const IntroLandingScreen(),
+
+        // This is your Main Dashboard (LandingScreen)
         '/dashboard': (ctx) => const LandingScreen(),
+
+        // Other routes
         '/players': (ctx) => const HomeScreen(),
         '/players/add': (ctx) => const AddPlayerScreen(),
         '/groups': (ctx) => const GroupListScreen(),
         '/fees': (ctx) => const FeeListScreen(),
         '/all-players-installments': (ctx) => const AllPlayersInstallmentsScreen(),
         '/sms-reminders': (ctx) => const SmsReminderScreen(),
+        '/overdue-players': (context) => const OverduePlayersScreen(),
 
-        // --- UPDATED ROUTE HANDLER ---
+        // Dynamic Route: All Installments with Filter
         '/all-installments': (ctx) {
           final args = ModalRoute.of(ctx)?.settings.arguments;
           if (args is Map<String, dynamic>) {
@@ -54,12 +64,10 @@ class MyApp extends StatelessWidget {
           }
           return const AllInstallmentsScreen();
         },
-        '/overdue-players': (context) => OverduePlayersScreen(),
 
-
-
+        // Dynamic Route: Installment Summary
         '/installment-summary': (context) {
-          final args = ModalRoute.of(context)!.settings.arguments;
+          final args = ModalRoute.of(context)?.settings.arguments;
           if (args is Map<String, dynamic>) {
             return InstallmentSummaryScreen(
               initialMonth: args['month'] as String?,
@@ -71,6 +79,8 @@ class MyApp extends StatelessWidget {
           return const InstallmentSummaryScreen();
         },
       },
+
+      // Route Generator for complex args (like Payments)
       onGenerateRoute: (settings) {
         if (settings.name == '/payments') {
           final args = settings.arguments;
@@ -82,9 +92,10 @@ class MyApp extends StatelessWidget {
               settings: settings,
             );
           }
-          return MaterialPageRoute(builder: (_) => PaymentsListScreen(installmentId: 0), settings: settings);
+          // Fallback if no args provided
+          return MaterialPageRoute(builder: (_) => const PaymentsListScreen(installmentId: 0), settings: settings);
         }
-        return MaterialPageRoute(builder: (_) => const SplashScreen(), settings: settings);
+        return null; // Let unknown routes fail or go to default
       },
     );
   }

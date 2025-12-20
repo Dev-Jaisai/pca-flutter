@@ -1,5 +1,6 @@
 // lib/screens/home_screen.dart
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import '../../models/player.dart';
 import '../../services/api_service.dart';
 import '../../services/data_manager.dart';
@@ -109,7 +110,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       backgroundColor: bg,
       appBar: AppBar(
-        title: Text('All players'.toUpperCase()),
+        title: Text('All players'),
         backgroundColor: Colors.white,
         elevation: 0,
         foregroundColor: Colors.black87,
@@ -129,7 +130,11 @@ class _HomeScreenState extends State<HomeScreen> {
           itemCount: _players.length,
           itemBuilder: (context, index) {
             final p = _players[index];
-            return _buildPlayerCard(p);
+            final delay = Duration(milliseconds: 50 * index);
+            return _buildPlayerCard(_players[index])
+                .animate() // Start Animation
+                .fadeIn(duration: 400.ms, delay: delay) // Fade In
+                .slideX(begin: 0.2, end: 0, duration: 400.ms, delay: delay, curve: Curves.easeOutQuad); // Slide from right
           },
         ),
       ),
@@ -167,19 +172,22 @@ class _HomeScreenState extends State<HomeScreen> {
             padding: const EdgeInsets.all(16.0),
             child: Row(
               children: [
-                // Avatar
-                CircleAvatar(
-                  radius: 26,
-                  backgroundColor: Colors.deepPurple.shade50,
-                  backgroundImage: (p.photoUrl != null && p.photoUrl!.isNotEmpty)
-                      ? NetworkImage(p.photoUrl!)
-                      : null,
-                  child: (p.photoUrl == null || p.photoUrl!.isEmpty)
-                      ? Text(
-                    p.name.isNotEmpty ? p.name[0].toUpperCase() : '?',
-                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple.shade700, fontSize: 18),
-                  )
-                      : null,
+                // ✅ 1. Wrap Avatar in Hero
+                Hero(
+                  tag: 'avatar_${p.id}', // Unique ID for this player
+                  child: CircleAvatar(
+                    radius: 26,
+                    backgroundColor: Colors.deepPurple.shade50,
+                    backgroundImage: (p.photoUrl != null && p.photoUrl!.isNotEmpty)
+                        ? NetworkImage(p.photoUrl!)
+                        : null,
+                    child: (p.photoUrl == null || p.photoUrl!.isEmpty)
+                        ? Text(
+                      p.name.isNotEmpty ? p.name[0].toUpperCase() : '?',
+                      style: TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple.shade700, fontSize: 18),
+                    )
+                        : null,
+                  ),
                 ),
                 const SizedBox(width: 16),
 

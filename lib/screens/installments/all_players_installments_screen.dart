@@ -3,6 +3,8 @@ import 'package:intl/intl.dart';
 import '../../models/player.dart';
 import '../../models/player_installment_summary.dart';
 import '../../services/api_service.dart';
+import '../../services/data_manager.dart'; // Import DataManager
+import '../payments/payment_list_screen.dart';
 
 class AllPlayersInstallmentsScreen extends StatefulWidget {
   final String? initialMonth; // YYYY-MM format
@@ -23,38 +25,68 @@ class _AllPlayersInstallmentsScreenState extends State<AllPlayersInstallmentsScr
   @override
   void initState() {
     super.initState();
-    // Set default month to current month
     final now = DateTime.now();
     _selectedMonth = widget.initialMonth ?? '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}';
     _loadData();
   }
 
+  // ---------------------------------------------------------
+  // 🚀 OPTIMIZED LOAD LOGIC
+  // ---------------------------------------------------------
   Future<void> _loadData() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    // 1. Try loading from RAM/Disk Cache first (Instant)
+    final cachedPlayers = await DataManager().getPlayers();
+    final cachedInstallments = await DataManager().getCachedAllInstallments();
 
-    try {
-      // Load all players
-      final players = await ApiService.fetchPlayers();
-
-      // Load installment summary for selected month
-      final summary = await ApiService.fetchInstallmentSummary(_selectedMonth);
-
-      setState(() {
-        _allPlayers = players;
-        _installmentSummary = summary;
-      });
-    } catch (e) {
-      setState(() {
-        _error = e.toString();
-      });
-    } finally {
-      setState(() {
-        _loading = false;
-      });
+    if (cachedPlayers.isNotEmpty && cachedInstallments != null) {
+      if (mounted) {
+        setState(() {
+          _allPlayers = cachedPlayers;
+          _filterAndSetSummaries(cachedInstallments);
+          _loading = false;
+        });
+      }
+    } else {
+      if (mounted) setState(() => _loading = true);
     }
+
+    // 2. Fetch Fresh Data in Background
+    try {
+      // Use DataManager to fetch fresh data (it handles caching)
+      final freshPlayers = await DataManager().getPlayers(forceRefresh: true);
+      final freshInstallments = await DataManager().getAllInstallments(forceRefresh: true); // Make sure this method exists in your DataManager or use ApiService directly + Save
+
+      if (mounted) {
+        setState(() {
+          _allPlayers = freshPlayers;
+          _filterAndSetSummaries(freshInstallments);
+          _loading = false;
+          _error = null;
+        });
+      }
+    } catch (e) {
+      if (mounted && _allPlayers.isEmpty) {
+        setState(() {
+          _loading = false;
+          _error = e.toString();
+        });
+      }
+    }
+  }
+  void _filterAndSetSummaries(List<PlayerInstallmentSummary> allItems) {
+    final parts = _selectedMonth.split('-');
+    final targetYear = int.parse(parts[0]);
+    final targetMonth = int.parse(parts[1]);
+
+    final filtered = allItems.where((item) {
+      // ✅ Only check Due Date (This is safer and fixes your logic issue)
+      if (item.dueDate != null) {
+        return item.dueDate!.year == targetYear && item.dueDate!.month == targetMonth;
+      }
+      return false; // If no date, don't show in monthly view
+    }).toList();
+
+    _installmentSummary = filtered;
   }
 
   Future<void> _pickMonth() async {
@@ -63,215 +95,157 @@ class _AllPlayersInstallmentsScreenState extends State<AllPlayersInstallmentsScr
     final initialYear = int.tryParse(parts[0]) ?? now.year;
     final initialMonth = int.tryParse(parts[1]) ?? now.month;
 
-    final initialDate = DateTime(initialYear, initialMonth);
-
-    final picked = await showDatePicker(
+    final picked = await showDialog<DateTime>(
       context: context,
-      initialDate: initialDate,
-      firstDate: DateTime(now.year - 2),
-      lastDate: DateTime(now.year + 2),
-      helpText: 'Select Month',
-      initialEntryMode: DatePickerEntryMode.calendar,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text("Select Month"),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Simple Dropdown for Year/Month (Faster than DatePicker for billing)
+              DropdownButton<int>(
+                value: initialYear,
+                isExpanded: true,
+                items: List.generate(5, (i) => DropdownMenuItem(value: now.year - 2 + i, child: Text('${now.year - 2 + i}'))),
+                onChanged: (v) => Navigator.pop(ctx, DateTime(v!, initialMonth)),
+              ),
+              const SizedBox(height: 10),
+              DropdownButton<int>(
+                value: initialMonth,
+                isExpanded: true,
+                items: List.generate(12, (i) => DropdownMenuItem(value: i + 1, child: Text(DateFormat('MMMM').format(DateTime(2024, i + 1))))),
+                onChanged: (v) => Navigator.pop(ctx, DateTime(initialYear, v!)),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
+
+    // Or use the standard picker if you prefer
+    // final picked = await showDatePicker(...)
 
     if (picked != null) {
       final newMonth = '${picked.year.toString().padLeft(4, '0')}-${picked.month.toString().padLeft(2, '0')}';
       setState(() {
         _selectedMonth = newMonth;
+        // Re-filter the existing data immediately (Instant)
+        DataManager().getCachedAllInstallments().then((list) {
+          if(list != null) _filterAndSetSummaries(list);
+        });
       });
-      await _loadData();
+      // Then refresh from API
+      _loadData();
     }
   }
 
-  // Find installment summary for a player
   PlayerInstallmentSummary? _getPlayerSummary(int playerId) {
-    return _installmentSummary.firstWhere(
-          (summary) => summary.playerId == playerId,
-      orElse: () => PlayerInstallmentSummary(
+    // Look up in the FILTERED list
+    try {
+      return _installmentSummary.firstWhere((s) => s.playerId == playerId);
+    } catch (e) {
+      // Return a dummy "No Installment" object
+      return PlayerInstallmentSummary(
         playerId: playerId,
         playerName: '',
         totalPaid: 0.0,
         status: 'NO_INSTALLMENT',
-      ),
-    );
+      );
+    }
   }
 
   Widget _buildPlayerRow(Player player) {
     final summary = _getPlayerSummary(player.id);
-    final df = DateFormat('dd MMM yyyy');
+    final df = DateFormat('dd MMM');
 
-    // Status color coding
     Color getStatusColor(String status) {
       switch (status) {
-        case 'PAID':
-          return Colors.green;
-        case 'PARTIALLY_PAID':
-          return Colors.orange;
-        case 'PENDING':
-          return Colors.red;
-        case 'NO_INSTALLMENT':
-        default:
-          return Colors.grey;
+        case 'PAID': return Colors.green;
+        case 'PARTIALLY_PAID': return Colors.orange;
+        case 'PENDING': return Colors.red;
+        case 'NO_INSTALLMENT': return Colors.grey;
+        default: return Colors.grey;
       }
     }
 
     String getStatusText(String status) {
-      switch (status) {
-        case 'PAID':
-          return 'PAID';
-        case 'PARTIALLY_PAID':
-          return 'PARTIAL';
-        case 'PENDING':
-          return 'PENDING';
-        case 'NO_INSTALLMENT':
-        default:
-          return 'NO INSTALLMENT';
-      }
+      if (status == 'NO_INSTALLMENT') return 'Create';
+      return status.replaceAll('_', ' ');
     }
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
-        padding: const EdgeInsets.all(12.0),
+        padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
         child: Row(
           children: [
-            // Player Avatar
+            // Avatar
             CircleAvatar(
-              radius: 24,
-              backgroundColor: Colors.deepPurple.shade100,
+              radius: 22,
+              backgroundColor: Colors.deepPurple.shade50,
               child: Text(
                 player.name.isNotEmpty ? player.name[0].toUpperCase() : '?',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(color: Colors.deepPurple.shade700, fontWeight: FontWeight.bold),
               ),
             ),
+            const SizedBox(width: 16),
 
-            const SizedBox(width: 12),
-
-            // Player Info
+            // Info
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    player.name,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-
+                  Text(player.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                   const SizedBox(height: 4),
+                  Text('${player.group ?? '-'} • ${player.phone ?? '-'}', style: TextStyle(color: Colors.grey[600], fontSize: 13)),
 
-                  Text(
-                    '${player.group} • ${player.phone}',
-                    style: TextStyle(
-                      color: Colors.grey[700],
-                      fontSize: 12,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-
-                  const SizedBox(height: 8),
-
-                  // Installment Details
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (summary!.installmentAmount != null)
-                              Text(
-                                'Amount: ₹${summary.installmentAmount!.toStringAsFixed(2)}',
-                                style: const TextStyle(fontSize: 12),
-                              ),
-
-                            Text(
-                              'Paid: ₹${summary.totalPaid.toStringAsFixed(2)}',
-                              style: const TextStyle(fontSize: 12),
-                            ),
-
-                            Text(
-                              summary.remaining != null
-                                  ? 'Left: ₹${summary.remaining!.toStringAsFixed(2)}'
-                                  : 'Left: —',
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      // Due Date and Status
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          if (summary.dueDate != null)
-                            Text(
-                              'Due: ${df.format(summary.dueDate!)}',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey[700],
-                              ),
-                            ),
-
-                          const SizedBox(height: 4),
-
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: getStatusColor(summary.status).withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: getStatusColor(summary.status),
-                                width: 1,
-                              ),
-                            ),
-                            child: Text(
-                              getStatusText(summary.status),
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                color: getStatusColor(summary.status),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
+                  if (summary!.status != 'NO_INSTALLMENT') ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Text('Paid: ₹${summary.totalPaid?.toStringAsFixed(0) ?? 0}', style: const TextStyle(fontSize: 12, color: Colors.green)),
+                        const SizedBox(width: 10),
+                        Text('Left: ₹${summary.remaining?.toStringAsFixed(0) ?? 0}', style: const TextStyle(fontSize: 12, color: Colors.red)),
+                      ],
+                    )
+                  ]
                 ],
               ),
             ),
 
-            // Action Button
-            IconButton(
-              icon: Icon(
-                summary.status == 'NO_INSTALLMENT'
-                    ? Icons.add_circle_outline
-                    : Icons.receipt_long,
-                color: summary.status == 'NO_INSTALLMENT'
-                    ? Colors.deepPurple
-                    : Colors.grey,
-              ),
-              onPressed: () {
-                if (summary.status == 'NO_INSTALLMENT') {
-                  _createInstallmentForPlayer(player);
-                } else {
-                  _viewInstallmentDetails(player, summary);
-                }
-              },
-              tooltip: summary.status == 'NO_INSTALLMENT'
-                  ? 'Create Installment'
-                  : 'View Details',
+            // Status / Action
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                if (summary.dueDate != null)
+                  Text('Due: ${df.format(summary.dueDate!)}', style: TextStyle(fontSize: 11, color: Colors.grey[800])),
+
+                const SizedBox(height: 6),
+
+                InkWell(
+                  onTap: () {
+                    if (summary.status == 'NO_INSTALLMENT') {
+                      _createInstallmentForPlayer(player);
+                    } else {
+                      _viewInstallmentDetails(player, summary);
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: getStatusColor(summary.status!).withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: getStatusColor(summary.status!), width: 1),
+                    ),
+                    child: Text(
+                      getStatusText(summary.status!),
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: getStatusColor(summary.status!)),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -280,93 +254,61 @@ class _AllPlayersInstallmentsScreenState extends State<AllPlayersInstallmentsScr
   }
 
   Future<void> _createInstallmentForPlayer(Player player) async {
-    final now = DateTime.now();
     final parts = _selectedMonth.split('-');
     final year = int.parse(parts[0]);
     final month = int.parse(parts[1]);
 
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Create Installment for ${player.name}'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Month: ${DateFormat('MMMM yyyy').format(DateTime(year, month))}'),
-            const SizedBox(height: 16),
-            const Text('This will create an installment for the selected month.'),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              try {
-                await ApiService.createInstallmentForPlayer(
-                  playerId: player.id,
-                  periodMonth: month,
-                  periodYear: year,
-                  dueDate: DateTime(year, month, 10), // 10th of the month
-                  amount: 500.0, // Default amount or fetch from fee structure
-                );
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Installment created for ${player.name}')),
-                );
-                await _loadData();
-              } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Failed: $e')),
-                );
-              }
-            },
-            child: const Text('Create'),
-          ),
-        ],
-      ),
+    // Simple Dialog to confirm creation
+    await ApiService.createInstallmentForPlayer(
+      playerId: player.id,
+      periodMonth: month,
+      periodYear: year,
+      dueDate: DateTime(year, month, 10),
+      amount: 500.0, // Should be fetched from fee structure ideally
     );
+
+    // Refresh Data
+    _loadData();
   }
 
   void _viewInstallmentDetails(Player player, PlayerInstallmentSummary summary) {
     if (summary.installmentId != null) {
-      // Navigate to installment details screen
-      Navigator.pushNamed(
+      Navigator.push(
         context,
-        '/installment-details',
-        arguments: {
-          'player': player,
-          'installmentId': summary.installmentId,
-        },
-      );
+        MaterialPageRoute(
+          builder: (_) => PaymentsListScreen(
+              installmentId: summary.installmentId!,
+              remainingAmount: summary.remaining
+          ),
+        ),
+      ).then((_) => _loadData());
     }
   }
-
   @override
   Widget build(BuildContext context) {
-    final monthLabel = () {
-      final parts = _selectedMonth.split('-');
-      final year = int.tryParse(parts[0]) ?? DateTime.now().year;
-      final month = int.tryParse(parts[1]) ?? DateTime.now().month;
-      return DateFormat('MMMM yyyy').format(DateTime(year, month));
-    }();
+    final parts = _selectedMonth.split('-');
+    final monthLabel = DateFormat('MMMM yyyy').format(
+        DateTime(int.parse(parts[0]), int.parse(parts[1])));
 
     return Scaffold(
+      backgroundColor: const Color(0xFFF5F7FA),
       appBar: AppBar(
-        title: Text('All Players - $monthLabel'),
+        title: Text(
+            monthLabel, style: const TextStyle(fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black87,
+        elevation: 0,
+        // ✅ Explicit Back Button
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.pop(context),
+        ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.calendar_today),
+            icon: const Icon(Icons.calendar_month, color: Colors.deepPurple),
             onPressed: _pickMonth,
-            tooltip: 'Select Month',
           ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadData,
-            tooltip: 'Refresh',
-          ),
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadData),
         ],
       ),
       body: _loading
@@ -381,6 +323,8 @@ class _AllPlayersInstallmentsScreenState extends State<AllPlayersInstallmentsScr
           padding: const EdgeInsets.only(top: 8, bottom: 24),
           itemCount: _allPlayers.length,
           itemBuilder: (context, index) {
+            // ✅ FIX 1: Use the correct variable name (_allPlayers, not _players)
+            // ✅ FIX 2: Use the correct method name (_buildPlayerRow, not _buildPlayerCard)
             return _buildPlayerRow(_allPlayers[index]);
           },
         ),

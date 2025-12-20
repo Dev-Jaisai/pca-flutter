@@ -468,10 +468,13 @@ class DashboardStatsState extends State<DashboardStats>
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
+
       children: [
+        const SizedBox(height: 16),
         const Text(
           'Quick Stats',
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+
         ),
         const SizedBox(height: 12),
         SizedBox(

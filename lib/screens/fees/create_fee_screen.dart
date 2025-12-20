@@ -1,7 +1,7 @@
-// lib/screens/fees/create_fee_screen.dart
 import 'package:flutter/material.dart';
 import '../../models/group.dart';
 import '../../services/api_service.dart';
+import '../../services/data_manager.dart'; // ✅ Import DataManager
 
 class CreateFeeScreen extends StatefulWidget {
   const CreateFeeScreen({super.key});
@@ -12,8 +12,11 @@ class CreateFeeScreen extends StatefulWidget {
 
 class _CreateFeeScreenState extends State<CreateFeeScreen> {
   final _formKey = GlobalKey<FormState>();
+
   List<Group> _groups = [];
-  Group? _selectedGroup;
+  // ✅ FIX: Use ID (int) instead of Object (Group)
+  int? _selectedGroupId;
+
   final _feeCtl = TextEditingController();
   DateTime? _effectiveFrom;
   DateTime? _effectiveTo;
@@ -27,25 +30,31 @@ class _CreateFeeScreenState extends State<CreateFeeScreen> {
     _loadGroups();
   }
 
-  @override
-  void dispose() {
-    _feeCtl.dispose();
-    super.dispose();
-  }
-
   Future<void> _loadGroups() async {
     try {
-      final groups = await ApiService.fetchGroups();
-      setState(() {
-        _groups = groups;
-        _selectedGroup = groups.isNotEmpty ? groups.first : null;
-        _loading = false;
-      });
+      // 1. Try Cache First
+      var groups = await DataManager().getGroups();
+
+      // If cache empty, try force fetch
+      if (groups.isEmpty) {
+        groups = await DataManager().getGroups(forceRefresh: true);
+      }
+
+      if (mounted) {
+        setState(() {
+          _groups = groups;
+          // ✅ FIX: Automatically select the first ID if valid
+          if (groups.isNotEmpty) {
+            // Only set default if nothing selected yet or selected is invalid
+            if (_selectedGroupId == null || !_groups.any((g) => g.id == _selectedGroupId)) {
+              _selectedGroupId = groups.first.id;
+            }
+          }
+          _loading = false;
+        });
+      }
     } catch (e) {
-      setState(() {
-        _error = 'Failed to load groups: $e';
-        _loading = false;
-      });
+      if (mounted) setState(() { _error = '$e'; _loading = false; });
     }
   }
 
@@ -68,7 +77,7 @@ class _CreateFeeScreenState extends State<CreateFeeScreen> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    if (_selectedGroup == null) {
+    if (_selectedGroupId == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please select group')));
       return;
     }
@@ -77,46 +86,53 @@ class _CreateFeeScreenState extends State<CreateFeeScreen> {
     try {
       final fee = double.parse(_feeCtl.text.trim());
 
-      // THIS IS THE KEY LINE - Saving to MySQL via API
+      // ✅ FIX: Use the selected ID directly
       final createdFee = await ApiService.createFeeStructure(
-        groupId: _selectedGroup!.id,
+        groupId: _selectedGroupId!,
         monthlyFee: fee,
         effectiveFrom: _effectiveFrom,
         effectiveTo: _effectiveTo,
       );
 
-      if (!mounted) return;
+      // Refresh cache so the list screen updates
+      DataManager().invalidateFees();
 
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Fee ₹${createdFee.monthlyFee} created for ${createdFee.groupName}')),
       );
-
-      Navigator.of(context).pop(true); // Return success
+      Navigator.of(context).pop(true);
 
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Create failed: $e')),
-        );
-      }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Create failed: $e')));
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
   }
 
   @override
+  void dispose() {
+    _feeCtl.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (_loading) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Create Fee')),
-        body: const Center(child: CircularProgressIndicator()),
-      );
-    }
+    if (_loading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
 
     if (_error != null) {
       return Scaffold(
         appBar: AppBar(title: const Text('Create Fee')),
-        body: Center(child: Text('Error: $_error')),
+        body: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Error: $_error'),
+                const SizedBox(height: 10),
+                ElevatedButton(onPressed: _loadGroups, child: const Text("Retry"))
+              ],
+            )
+        ),
       );
     }
 
@@ -128,46 +144,40 @@ class _CreateFeeScreenState extends State<CreateFeeScreen> {
           key: _formKey,
           child: Column(
             children: [
-              DropdownButtonFormField<Group>(
-                value: _selectedGroup,
-                items: _groups.map((g) => DropdownMenuItem(
-                  value: g,
+              // ✅ FIXED DROPDOWN
+              DropdownButtonFormField<int>(
+                value: _selectedGroupId,
+                items: _groups.map((g) => DropdownMenuItem<int>(
+                  value: g.id, // Store ID
                   child: Text(g.name),
                 )).toList(),
-                onChanged: (g) => setState(() => _selectedGroup = g),
-                decoration: const InputDecoration(labelText: 'Group'),
+                onChanged: (id) => setState(() => _selectedGroupId = id),
+                decoration: const InputDecoration(labelText: 'Group', border: OutlineInputBorder()),
                 validator: (v) => v == null ? 'Choose a group' : null,
               ),
+
               const SizedBox(height: 16),
               TextFormField(
                 controller: _feeCtl,
-                decoration: const InputDecoration(labelText: 'Monthly Fee'),
+                decoration: const InputDecoration(labelText: 'Monthly Fee', border: OutlineInputBorder()),
                 keyboardType: TextInputType.number,
-                validator: (v) {
-                  if (v == null || v.isEmpty) return 'Enter fee amount';
-                  final amount = double.tryParse(v);
-                  if (amount == null || amount <= 0) return 'Enter valid amount';
-                  return null;
-                },
+                validator: (v) => (v == null || double.tryParse(v) == null) ? 'Enter valid amount' : null,
               ),
               const SizedBox(height: 16),
               Row(
                 children: [
                   Expanded(
-                    child: TextButton.icon(
+                    child: OutlinedButton.icon(
                       icon: const Icon(Icons.calendar_today),
-                      label: Text(_effectiveFrom == null
-                          ? 'Start Date'
-                          : 'From: ${_effectiveFrom!.toString().split(' ')[0]}'),
+                      label: Text(_effectiveFrom == null ? 'Start Date' : _effectiveFrom!.toString().split(' ')[0]),
                       onPressed: () => _pickDate(context, true),
                     ),
                   ),
+                  const SizedBox(width: 10),
                   Expanded(
-                    child: TextButton.icon(
-                      icon: const Icon(Icons.calendar_today),
-                      label: Text(_effectiveTo == null
-                          ? 'End Date'
-                          : 'To: ${_effectiveTo!.toString().split(' ')[0]}'),
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.event),
+                      label: Text(_effectiveTo == null ? 'End Date' : _effectiveTo!.toString().split(' ')[0]),
                       onPressed: () => _pickDate(context, false),
                     ),
                   ),
@@ -176,11 +186,11 @@ class _CreateFeeScreenState extends State<CreateFeeScreen> {
               const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,
+                height: 50,
                 child: ElevatedButton(
                   onPressed: _submitting ? null : _submit,
-                  child: _submitting
-                      ? const CircularProgressIndicator()
-                      : const Text('Create Fee in Database'),
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple, foregroundColor: Colors.white),
+                  child: _submitting ? const CircularProgressIndicator(color: Colors.white) : const Text('Create Fee'),
                 ),
               ),
             ],
