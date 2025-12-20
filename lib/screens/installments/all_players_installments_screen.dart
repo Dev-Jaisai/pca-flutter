@@ -284,16 +284,17 @@ class _AllPlayersInstallmentsScreenState extends State<AllPlayersInstallmentsScr
       ).then((_) => _loadData());
     }
   }
-
   @override
   Widget build(BuildContext context) {
     final parts = _selectedMonth.split('-');
-    final monthLabel = DateFormat('MMMM yyyy').format(DateTime(int.parse(parts[0]), int.parse(parts[1])));
+    final monthLabel = DateFormat('MMMM yyyy').format(
+        DateTime(int.parse(parts[0]), int.parse(parts[1])));
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
       appBar: AppBar(
-        title: Text(monthLabel, style: const TextStyle(fontWeight: FontWeight.bold)),
+        title: Text(
+            monthLabel, style: const TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Colors.white,
         foregroundColor: Colors.black87,
         elevation: 0,
@@ -322,6 +323,8 @@ class _AllPlayersInstallmentsScreenState extends State<AllPlayersInstallmentsScr
           padding: const EdgeInsets.only(top: 8, bottom: 24),
           itemCount: _allPlayers.length,
           itemBuilder: (context, index) {
+            // ✅ FIX 1: Use the correct variable name (_allPlayers, not _players)
+            // ✅ FIX 2: Use the correct method name (_buildPlayerRow, not _buildPlayerCard)
             return _buildPlayerRow(_allPlayers[index]);
           },
         ),

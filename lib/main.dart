@@ -15,7 +15,7 @@ import 'screens/installments/all_installments_screen.dart';
 import 'screens/installments/all_players_installments_screen.dart';
 import 'screens/installments/overdue_players_screen.dart';
 import 'screens/reminders/sms_reminder_screen.dart';
-
+import 'screens/landing/landing_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Hive.initFlutter();

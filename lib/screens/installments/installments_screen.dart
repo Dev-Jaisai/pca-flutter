@@ -90,20 +90,39 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
   @override
   Widget build(BuildContext context) {
     const bg = Color(0xFFF5F7FA);
-
     return Scaffold(
       backgroundColor: bg,
       appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        // ✅ 2. Change Title to include the Avatar
+        title: Row(
           children: [
-            Text(
-              widget.player.name,
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            Hero(
+              tag: 'avatar_${widget.player.id}', // SAME Unique ID
+              child: CircleAvatar(
+                radius: 20, // Slightly smaller than list
+                backgroundColor: Colors.deepPurple.shade50,
+                child: Text(
+                  widget.player.name.isNotEmpty ? widget.player.name[0].toUpperCase() : '?',
+                  style: TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple.shade700, fontSize: 16),
+                ),
+              ),
             ),
-            const Text(
-              'Installment History',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.player.name,
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const Text(
+                    'Installment History',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
