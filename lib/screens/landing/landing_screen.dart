@@ -4,6 +4,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 // Screens
 import '../home/add_player_screen.dart';
 import '../../widgets/dashboard_stats.dart';
+import '../installments/BulkExtendScreen.dart';
 import '../installments/installment_summary_screen.dart';
 import '../reminders/sms_reminder_screen.dart';
 import '../installments/all_installments_screen.dart';
@@ -11,7 +12,7 @@ import '../home/home_screen.dart';
 import '../groups/group_list_screen.dart';
 import '../fees/fee_list_screen.dart';
 
-// ✅ NEW IMPORTS FOR SEARCH
+// Search & Data Imports
 import '../../services/data_manager.dart';
 import '../home/player_search_delegate.dart';
 
@@ -177,14 +178,10 @@ class _LandingScreenState extends State<LandingScreen> {
                         ],
                       ),
 
-                      // 🔍 ✅ SEARCH ICON (Replaces static logo or sits next to it)
-                      // I put it here so it's easily accessible at the top right
+                      // 🔍 SEARCH ICON
                       GestureDetector(
                         onTap: () async {
-                          // 1. Get players from RAM Cache (Instant)
                           final players = await DataManager().getPlayers();
-
-                          // 2. Open Search
                           if (context.mounted) {
                             showSearch(
                               context: context,
@@ -208,7 +205,7 @@ class _LandingScreenState extends State<LandingScreen> {
                             ],
                           ),
                           child: const Icon(
-                            Icons.search, // Changed to Search Icon
+                            Icons.search,
                             size: 28,
                             color: Colors.white,
                           ),
@@ -293,6 +290,7 @@ class _LandingScreenState extends State<LandingScreen> {
                     spacing: 12,
                     runSpacing: 12,
                     children: [
+                      // 1. All Installments
                       _buildQuickActionCard(
                         icon: Icons.list_alt,
                         label: 'All Installments',
@@ -302,6 +300,8 @@ class _LandingScreenState extends State<LandingScreen> {
                           MaterialPageRoute(builder: (_) => const AllInstallmentsScreen()),
                         ),
                       ),
+
+                      // 2. Manage Players
                       _buildQuickActionCard(
                         icon: Icons.people,
                         label: 'Manage Players',
@@ -311,6 +311,8 @@ class _LandingScreenState extends State<LandingScreen> {
                           MaterialPageRoute(builder: (_) => const HomeScreen()),
                         ),
                       ),
+
+                      // 3. Groups
                       _buildQuickActionCard(
                         icon: Icons.group,
                         label: 'Groups',
@@ -320,6 +322,8 @@ class _LandingScreenState extends State<LandingScreen> {
                           MaterialPageRoute(builder: (_) => const GroupListScreen()),
                         ),
                       ),
+
+                      // 4. Fees
                       _buildQuickActionCard(
                         icon: Icons.monetization_on,
                         label: 'Fee Structures',
@@ -327,6 +331,17 @@ class _LandingScreenState extends State<LandingScreen> {
                         onTap: () => Navigator.push(
                           context,
                           MaterialPageRoute(builder: (_) => const FeeListScreen()),
+                        ),
+                      ),
+
+                      // ✅ 5. NEW: EXTEND DATES (Added Here)
+                      _buildQuickActionCard(
+                        icon: Icons.edit_calendar,
+                        label: 'Extend Dates',
+                        color: Colors.pink.shade600, // Distinct Color
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const BulkExtendScreen()),
                         ),
                       ),
                     ],
