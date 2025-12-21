@@ -7,7 +7,6 @@ import '../../services/data_manager.dart';
 import '../../widgets/FinancialSummaryCard.dart';
 import '../../widgets/PlayerSummaryCard.dart';
 
-
 class PlayerConsolidatedSummary {
   final int playerId;
   final String playerName;
@@ -32,6 +31,7 @@ class PlayerConsolidatedSummary {
 
 class AllInstallmentsScreen extends StatefulWidget {
   final String? initialFilter;
+
   const AllInstallmentsScreen({super.key, this.initialFilter});
 
   @override
@@ -61,7 +61,12 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
   Future<void> _loadAllData() async {
     final cachedData = await DataManager().getCachedAllInstallments();
     if (cachedData != null && cachedData.isNotEmpty) {
-      if (mounted) setState(() { _allItems = cachedData; _isLoading = false; });
+      if (mounted) {
+        setState(() {
+          _allItems = cachedData;
+          _isLoading = false;
+        });
+      }
     } else {
       if (mounted) setState(() => _isLoading = true);
     }
@@ -69,9 +74,20 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
     try {
       final List<PlayerInstallmentSummary> list = await ApiService.fetchAllInstallmentsSummary(page: 0, size: 2000);
       await DataManager().saveAllInstallments(list);
-      if (mounted) setState(() { _allItems = list; _isLoading = false; _error = null; });
+      if (mounted) {
+        setState(() {
+          _allItems = list;
+          _isLoading = false;
+          _error = null;
+        });
+      }
     } catch (e) {
-      if (mounted && _allItems.isEmpty) setState(() { _isLoading = false; _error = e.toString(); });
+      if (mounted && _allItems.isEmpty) {
+        setState(() {
+          _isLoading = false;
+          _error = e.toString();
+        });
+      }
     }
   }
 
@@ -84,13 +100,23 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
         int selectedMonth = _selectedMonth.month;
         return StatefulBuilder(builder: (context, setStateDialog) {
           return AlertDialog(
-            title: const Text("Select Month"),
+            backgroundColor: const Color(0xFF203A43), // Dark Dialog
+            title: const Text("Select Month", style: TextStyle(color: Colors.white)),
             content: Row(
               children: [
                 Expanded(
                   child: DropdownButtonFormField<int>(
                     value: selectedMonth,
-                    items: List.generate(12, (i) => DropdownMenuItem(value: i+1, child: Text(DateFormat('MMM').format(DateTime(2024, i+1))))),
+                    dropdownColor: const Color(0xFF2C5364),
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white54)),
+                    ),
+                    items: List.generate(
+                        12,
+                            (i) => DropdownMenuItem(
+                            value: i + 1,
+                            child: Text(DateFormat('MMM').format(DateTime(2024, i + 1))))),
                     onChanged: (v) => setStateDialog(() => selectedMonth = v!),
                   ),
                 ),
@@ -98,15 +124,27 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
                 Expanded(
                   child: DropdownButtonFormField<int>(
                     value: selectedYear,
-                    items: List.generate(5, (i) => DropdownMenuItem(value: now.year - 2 + i, child: Text('${now.year - 2 + i}'))),
+                    dropdownColor: const Color(0xFF2C5364),
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white54)),
+                    ),
+                    items: List.generate(
+                        5,
+                            (i) => DropdownMenuItem(
+                            value: now.year - 2 + i,
+                            child: Text('${now.year - 2 + i}'))),
                     onChanged: (v) => setStateDialog(() => selectedYear = v!),
                   ),
                 ),
               ],
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+              TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("Cancel", style: TextStyle(color: Colors.white54))),
               ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.cyanAccent, foregroundColor: Colors.black),
                 onPressed: () => Navigator.pop(context, DateTime(selectedYear, selectedMonth, 1)),
                 child: const Text("Select"),
               ),
@@ -128,14 +166,16 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
         if (p.dueDate == null) return false;
         final st = (p.status ?? '').toUpperCase().replaceAll('_', ' ').trim();
         if (st == 'PAID') return false;
-        return p.dueDate!.year == _selectedMonth.year && p.dueDate!.month == _selectedMonth.month;
+        return p.dueDate!.year == _selectedMonth.year &&
+            p.dueDate!.month == _selectedMonth.month;
       }).toList();
     }
 
     if (_currentFilter == 'Due (Month)') {
       return _allItems.where((p) {
         if (p.dueDate == null) return false;
-        return p.dueDate!.year == _selectedMonth.year && p.dueDate!.month == _selectedMonth.month;
+        return p.dueDate!.year == _selectedMonth.year &&
+            p.dueDate!.month == _selectedMonth.month;
       }).toList();
     }
 
@@ -169,18 +209,36 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
 
     for (var summary in groupedMap.values) {
       summary.totalRemaining = summary.totalAmount - summary.totalPaid;
-      summary.installments.sort((a, b) => (a.dueDate ?? DateTime(2000)).compareTo(b.dueDate ?? DateTime(2000)));
+
+      // Sorting Logic (Unpaid Top, then Paid)
+      summary.installments.sort((a, b) {
+        bool isPaidA = (a.status ?? '').toUpperCase() == 'PAID';
+        bool isPaidB = (b.status ?? '').toUpperCase() == 'PAID';
+
+        if (isPaidA != isPaidB) {
+          return isPaidA ? 1 : -1;
+        }
+
+        DateTime dateA = a.dueDate ?? DateTime(2000);
+        DateTime dateB = b.dueDate ?? DateTime(2000);
+
+        if (isPaidA) {
+          return dateB.compareTo(dateA);
+        } else {
+          return dateA.compareTo(dateB);
+        }
+      });
     }
 
-    return groupedMap.values.toList()..sort((a, b) => b.totalRemaining.compareTo(a.totalRemaining));
+    return groupedMap.values.toList()
+      ..sort((a, b) => b.totalRemaining.compareTo(a.totalRemaining));
   }
 
-  // Calculate Header Stats
   Map<String, double> _calculateSummary(List<PlayerConsolidatedSummary> items) {
     double expected = 0;
     double collected = 0;
     double pending = 0;
-    for(var i in items) {
+    for (var i in items) {
       expected += i.totalAmount;
       collected += i.totalPaid;
       pending += i.totalRemaining;
@@ -208,21 +266,24 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FA),
+      extendBodyBehindAppBar: true, // IMPORTANT FOR GRADIENT
       appBar: AppBar(
-        title: Text(titleText, style: const TextStyle(fontWeight: FontWeight.bold)),
-        backgroundColor: Colors.white,
+        title: Text(titleText, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+        backgroundColor: Colors.transparent,
         elevation: 0,
-        foregroundColor: Colors.black87,
+        iconTheme: const IconThemeData(color: Colors.white),
         actions: [
           if (_currentFilter == 'Due (Month)' || _currentFilter == 'Upcoming')
             IconButton(
-              icon: const Icon(Icons.calendar_month, color: Colors.deepPurple),
+              icon: const Icon(Icons.calendar_month, color: Colors.cyanAccent),
               onPressed: _pickMonthForFilter,
             ),
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadAllData),
+          IconButton(icon: const Icon(Icons.refresh, color: Colors.white), onPressed: _loadAllData),
+
+          // Custom Styled Popup Menu
           PopupMenuButton<String>(
-            icon: const Icon(Icons.filter_list),
+            icon: const Icon(Icons.filter_list, color: Colors.white),
+            color: const Color(0xFF203A43), // Dark Background
             initialValue: _currentFilter,
             onSelected: (String val) {
               setState(() {
@@ -239,76 +300,115 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
               });
             },
             itemBuilder: (context) => [
-              const PopupMenuItem(value: 'All', child: Text('All Installments')),
-              const PopupMenuItem(value: 'Due (Month)', child: Text('This Month Due')),
-              const PopupMenuItem(value: 'Upcoming', child: Text('Upcoming (Next Month)')),
-              const PopupMenuDivider(),
-              const PopupMenuItem(value: 'Paid', child: Text('Paid Players')),
-              const PopupMenuItem(value: 'Pending', child: Text('Pending Players')),
+              const PopupMenuItem(value: 'All', child: Text('All Installments', style: TextStyle(color: Colors.white))),
+              const PopupMenuItem(value: 'Due (Month)', child: Text('This Month Due', style: TextStyle(color: Colors.white))),
+              const PopupMenuItem(value: 'Upcoming', child: Text('Upcoming (Next Month)', style: TextStyle(color: Colors.white))),
+              const PopupMenuDivider(height: 1),
+              const PopupMenuItem(value: 'Paid', child: Text('Paid Players', style: TextStyle(color: Colors.greenAccent))),
+              const PopupMenuItem(value: 'Pending', child: Text('Pending Players', style: TextStyle(color: Colors.redAccent))),
             ],
           ),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : groupedItems.isEmpty
-          ? Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.filter_alt_off, size: 60, color: Colors.grey.shade300),
-            const SizedBox(height: 16),
-            Text("No records found for $_currentFilter", style: TextStyle(color: Colors.grey.shade600)),
-          ],
-        ),
-      )
-          : RefreshIndicator(
-        onRefresh: _loadAllData,
-        child: ListView.builder(
-          padding: const EdgeInsets.only(top: 0, bottom: 80),
-          itemCount: groupedItems.length + 1,
-          itemBuilder: (ctx, i) {
-
-            // 1. Show Header
-            if (i == 0) {
-              return FinancialSummaryCard(
-                title: headerTitle,
-                totalTarget: stats['expected']!,
-                totalCollected: stats['collected']!,
-                totalPending: stats['pending']!,
-                countLabel: "${groupedItems.length} Players",
-              );
-            }
-
-            // 2. Show List
-            final group = groupedItems[i - 1];
-
-            final player = Player(
-                id: group.playerId,
-                name: group.playerName,
-                group: group.groupName,
-                phone: group.phone
-            );
-
-            final summary = PlayerInstallmentSummary(
-              playerId: group.playerId,
-              playerName: group.playerName,
-              totalPaid: group.totalPaid,
-              installmentAmount: group.totalAmount,
-              remaining: group.totalRemaining,
-              status: group.totalRemaining > 0 ? 'PENDING' : 'PAID',
-            );
-
-            return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: PlayerSummaryCard(
-                player: player,
-                summary: summary,
-                installments: group.installments,
+      body: Stack(
+        children: [
+          // 1. BACKGROUND GRADIENT
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color(0xFF0F2027), // Deep Black-Blue
+                  Color(0xFF203A43), // Slate
+                  Color(0xFF2C5364), // Teal-Dark
+                ],
               ),
-            );
-          },
-        ),
+            ),
+          ),
+
+          // 2. GLOWING ORBS
+          Positioned(
+            top: -50, right: -50,
+            child: Container(
+              height: 200, width: 200,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.purple.withOpacity(0.2), boxShadow: [BoxShadow(color: Colors.purple.withOpacity(0.2), blurRadius: 100, spreadRadius: 50)]),
+            ),
+          ),
+          Positioned(
+            bottom: 100, left: -50,
+            child: Container(
+              height: 200, width: 200,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.blue.withOpacity(0.2), boxShadow: [BoxShadow(color: Colors.blue.withOpacity(0.2), blurRadius: 100, spreadRadius: 50)]),
+            ),
+          ),
+
+          // 3. MAIN CONTENT
+          SafeArea(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator(color: Colors.cyanAccent))
+                : groupedItems.isEmpty
+                ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.filter_alt_off, size: 60, color: Colors.white24),
+                  const SizedBox(height: 16),
+                  Text("No records found for $_currentFilter", style: const TextStyle(color: Colors.white54)),
+                ],
+              ),
+            )
+                : RefreshIndicator(
+              onRefresh: _loadAllData,
+              color: Colors.cyanAccent,
+              backgroundColor: const Color(0xFF203A43),
+              child: ListView.builder(
+                padding: const EdgeInsets.only(top: 10, bottom: 80),
+                itemCount: groupedItems.length + 1,
+                itemBuilder: (ctx, i) {
+                  // 1. Show Header
+                  if (i == 0) {
+                    return FinancialSummaryCard(
+                      title: headerTitle,
+                      totalTarget: stats['expected']!,
+                      totalCollected: stats['collected']!,
+                      totalPending: stats['pending']!,
+                      countLabel: "${groupedItems.length} Players",
+                    );
+                  }
+
+                  // 2. Show List
+                  final group = groupedItems[i - 1];
+
+                  final player = Player(
+                      id: group.playerId,
+                      name: group.playerName,
+                      group: group.groupName,
+                      phone: group.phone);
+
+                  final summary = PlayerInstallmentSummary(
+                    playerId: group.playerId,
+                    playerName: group.playerName,
+                    totalPaid: group.totalPaid,
+                    installmentAmount: group.totalAmount,
+                    remaining: group.totalRemaining,
+                    status: group.totalRemaining > 0 ? 'PENDING' : 'PAID',
+                  );
+
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: PlayerSummaryCard(
+                      player: player,
+                      summary: summary,
+                      installments: group.installments,
+                      nextScreenFilter: _currentFilter == 'Overdue' ? 'Overdue' : null,
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
