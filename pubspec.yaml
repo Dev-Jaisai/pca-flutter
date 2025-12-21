@@ -7,6 +7,10 @@ environment:
   sdk: ^3.0.0
 
 dependencies:
+  pdf: ^3.10.0
+  printing: ^5.11.0
+  path_provider: ^2.0.15
+  open_file: ^3.3.0
   flutter:
     sdk: flutter
   flutter_animate: ^4.5.0  # <--- Add this
@@ -21,6 +25,7 @@ dependencies:
   hive_flutter: ^1.1.0
   font_awesome_flutter: ^10.7.0
   google_fonts: ^6.3.3
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
