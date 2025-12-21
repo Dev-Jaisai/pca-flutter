@@ -311,4 +311,27 @@ class DataManager {
   static String _encodeInstallments(List<PlayerInstallmentSummary> items) {
     return jsonEncode(items.map((e) => e.toJson()).toList());
   }
+
+  // ==========================================
+  // ✅ NEW: Clear All Cache (RAM + Disk)
+  // ==========================================
+  Future<void> clearAllCache() async {
+    debugPrint("🧹 Clearing entire cache...");
+
+    // 1. Clear RAM
+    _memGroups = null;
+    _memFees = null;
+    _memPlayers = null;
+    _memStatusMap = null;
+    _memAllInstallments = null;
+
+    // Clear Maps
+    _memPlayerDetails.clear();
+    _memPayments.clear();
+
+    // 2. Clear Disk (Hive)
+    await _box.clear();
+
+    debugPrint("✨ Cache cleared successfully.");
+  }
 }

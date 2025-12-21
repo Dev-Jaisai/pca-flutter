@@ -540,4 +540,29 @@ class ApiService {
       throw Exception('Failed to update fee: ${response.body}');
     }
   }
+  // --- BULK EXTEND API ---
+  static Future<String> bulkExtendForHolidays({
+    required DateTime holidayStart,
+    required DateTime holidayEnd,
+    int? groupId,
+  }) async {
+    final url = Uri.parse('$baseUrl/api/installments/extend-for-holidays');
+    final body = {
+      'holidayStart': holidayStart.toIso8601String().split('T')[0],
+      'holidayEnd': holidayEnd.toIso8601String().split('T')[0],
+      'groupId': groupId, // null for ALL groups
+    };
+
+    final response = await http.post(
+      url,
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode(body),
+    );
+
+    if (response.statusCode == 200) {
+      return response.body; // Success Message from Backend
+    } else {
+      throw Exception('Failed to extend dates: ${response.body}');
+    }
+  }
 }
