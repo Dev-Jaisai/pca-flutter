@@ -1,4 +1,4 @@
-// lib/screens/home_screen.dart
+import 'dart:ui'; // For Glassmorphism
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../../models/player.dart';
@@ -7,7 +7,7 @@ import '../../services/data_manager.dart';
 import '../../services/player_shimmer_list.dart';
 import '../installments/installments_screen.dart';
 import 'add_player_screen.dart';
-import 'edit_player_screen.dart'; // Import your edit screen
+import 'edit_player_screen.dart';
 import '../../utils/event_bus.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -46,12 +46,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _fetchFromApi() async {
     try {
       setState(() => _bgFetching = true);
-      // We only need players now, installment status is not needed for the list UI anymore
       final players = await ApiService.fetchPlayers();
-
-      // Save to RAM + Hive (passing empty list for statuses since we don't use them on card)
       await DataManager().saveData(players, []);
-
       if (!mounted) return;
       setState(() {
         _players = players;
@@ -71,13 +67,14 @@ class _HomeScreenState extends State<HomeScreen> {
     final shouldDelete = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete Player'),
-        content: Text('Are you sure you want to delete $name?'),
+        backgroundColor: const Color(0xFF203A43),
+        title: const Text('Delete Player', style: TextStyle(color: Colors.white)),
+        content: Text('Are you sure you want to delete $name?', style: const TextStyle(color: Colors.white70)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel', style: TextStyle(color: Colors.white54))),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('Delete', style: TextStyle(color: Colors.red))),
+              child: const Text('Delete', style: TextStyle(color: Colors.redAccent))),
         ],
       ),
     );
@@ -87,7 +84,7 @@ class _HomeScreenState extends State<HomeScreen> {
         await ApiService.deletePlayer(id);
         EventBus().fire(PlayerEvent('deleted'));
         _fetchFromApi();
-        if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$name deleted')));
+        if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Deleted successfully'), backgroundColor: Colors.redAccent));
       } catch (e) {
         if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete failed: $e')));
       }
@@ -104,131 +101,148 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    const bg = Color(0xFFFBF8FF);//local
-    const accent = Color(0xFF9B6CFF);
-
     return Scaffold(
-      backgroundColor: bg,
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: Text('All players'),
-        backgroundColor: Colors.white,
+        title: const Text('All Players', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+        backgroundColor: Colors.transparent,
         elevation: 0,
-        foregroundColor: Colors.black87,
+        iconTheme: const IconThemeData(color: Colors.white),
         actions: [
-          IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh)),
+          IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh, color: Colors.white)),
         ],
       ),
-      body: _showShimmer
-          ? const PlayerShimmerList()
-          : RefreshIndicator(
-        onRefresh: _refresh,
-        color: accent,
-        child: _players.isEmpty
-            ? ListView(children: const [SizedBox(height: 120), Center(child: Text('No players found'))])
-            : ListView.builder(
-          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-          itemCount: _players.length,
-          itemBuilder: (context, index) {
-            final p = _players[index];
-            final delay = Duration(milliseconds: 50 * index);
-            return _buildPlayerCard(_players[index])
-                .animate() // Start Animation
-                .fadeIn(duration: 400.ms, delay: delay) // Fade In
-                .slideX(begin: 0.2, end: 0, duration: 400.ms, delay: delay, curve: Curves.easeOutQuad); // Slide from right
-          },
-        ),
+      body: Stack(
+        children: [
+          // 1. BACKGROUND
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFF0F2027), Color(0xFF203A43), Color(0xFF2C5364)],
+              ),
+            ),
+          ),
+
+          // 2. ORBS
+          Positioned(top: -50, right: -50, child: Container(height: 200, width: 200, decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.purple.withOpacity(0.15), boxShadow: [BoxShadow(color: Colors.purple.withOpacity(0.2), blurRadius: 100)]))),
+          Positioned(bottom: 100, left: -50, child: Container(height: 200, width: 200, decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.blue.withOpacity(0.15), boxShadow: [BoxShadow(color: Colors.blue.withOpacity(0.2), blurRadius: 100)]))),
+
+          // 3. CONTENT
+          _showShimmer
+              ? const PlayerShimmerList() // Note: Shimmer might need updating for dark theme, but keeping for now
+              : RefreshIndicator(
+            onRefresh: _refresh,
+            color: Colors.cyanAccent,
+            backgroundColor: const Color(0xFF203A43),
+            child: _players.isEmpty
+                ? ListView(children: const [SizedBox(height: 120), Center(child: Text('No players found', style: TextStyle(color: Colors.white54)))])
+                : ListView.builder(
+              padding: const EdgeInsets.fromLTRB(16, 100, 16, 80), // Top padding for AppBar
+              itemCount: _players.length,
+              itemBuilder: (context, index) {
+                final p = _players[index];
+                final delay = Duration(milliseconds: 50 * index);
+                return _buildGlassPlayerCard(p)
+                    .animate()
+                    .fadeIn(duration: 400.ms, delay: delay)
+                    .slideX(begin: 0.2, end: 0, duration: 400.ms, delay: delay, curve: Curves.easeOutQuad);
+              },
+            ),
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _openAddPlayerForm,
         icon: const Icon(Icons.person_add),
-        label: const Text('Add Player'),
-        backgroundColor: accent,
+        label: const Text('Add Player', style: TextStyle(fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.cyanAccent,
+        foregroundColor: Colors.black,
       ),
     );
   }
 
-  Widget _buildPlayerCard(Player p) {
+  Widget _buildGlassPlayerCard(Player p) {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
+      child: ClipRRect(
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 3)),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          // Tapping the card opens the Profile / Installments screen
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => InstallmentsScreen(player: p)),
-            ).then((_) => _fetchFromApi());
-          },
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Row(
-              children: [
-                // ✅ 1. Wrap Avatar in Hero
-                Hero(
-                  tag: 'avatar_${p.id}', // Unique ID for this player
-                  child: CircleAvatar(
-                    radius: 26,
-                    backgroundColor: Colors.deepPurple.shade50,
-                    backgroundImage: (p.photoUrl != null && p.photoUrl!.isNotEmpty)
-                        ? NetworkImage(p.photoUrl!)
-                        : null,
-                    child: (p.photoUrl == null || p.photoUrl!.isEmpty)
-                        ? Text(
-                      p.name.isNotEmpty ? p.name[0].toUpperCase() : '?',
-                      style: TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple.shade700, fontSize: 18),
-                    )
-                        : null,
-                  ),
-                ),
-                const SizedBox(width: 16),
-
-                // Info
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white.withOpacity(0.1)),
+            ),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(16),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => InstallmentsScreen(player: p)),
+                  ).then((_) => _fetchFromApi());
+                },
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Row(
                     children: [
-                      Text(p.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 4),
-                      Text(
-                        "${p.group ?? 'No Group'} • ${p.phone ?? ''}",
-                        style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                      Hero(
+                        tag: 'avatar_${p.id}',
+                        child: CircleAvatar(
+                          radius: 26,
+                          backgroundColor: Colors.white.withOpacity(0.1),
+                          backgroundImage: (p.photoUrl != null && p.photoUrl!.isNotEmpty)
+                              ? NetworkImage(p.photoUrl!)
+                              : null,
+                          child: (p.photoUrl == null || p.photoUrl!.isEmpty)
+                              ? Text(
+                            p.name.isNotEmpty ? p.name[0].toUpperCase() : '?',
+                            style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.cyanAccent, fontSize: 18),
+                          )
+                              : null,
+                        ),
                       ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(p.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                            const SizedBox(height: 4),
+                            Text(
+                              "${p.group ?? 'No Group'} • ${p.phone ?? ''}",
+                              style: TextStyle(fontSize: 13, color: Colors.white.withOpacity(0.6)),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: Icon(Icons.edit_outlined, color: Colors.blueAccent.shade100, size: 22),
+                            onPressed: () async {
+                              final updated = await Navigator.push<bool>(
+                                context,
+                                MaterialPageRoute(builder: (_) => EditPlayerScreen(player: p)),
+                              );
+                              if (updated == true) _fetchFromApi();
+                            },
+                          ),
+                          IconButton(
+                            icon: Icon(Icons.delete_outline, color: Colors.redAccent.shade100, size: 22),
+                            onPressed: () => _confirmDelete(p.id, p.name),
+                          ),
+                        ],
+                      )
                     ],
                   ),
                 ),
-
-                // Actions: Edit & Delete ONLY
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.edit_outlined, color: Colors.blue, size: 22),
-                      tooltip: 'Edit Details',
-                      onPressed: () async {
-                        final updated = await Navigator.push<bool>(
-                          context,
-                          MaterialPageRoute(builder: (_) => EditPlayerScreen(player: p)),
-                        );
-                        if (updated == true) _fetchFromApi();
-                      },
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.delete_outline, color: Colors.red, size: 22),
-                      tooltip: 'Delete',
-                      onPressed: () => _confirmDelete(p.id, p.name),
-                    ),
-                  ],
-                )
-              ],
+              ),
             ),
           ),
         ),

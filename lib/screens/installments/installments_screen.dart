@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../models/player.dart';
@@ -29,8 +30,6 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
   final df = DateFormat('dd MMM yyyy');
 
   String _currentFilter = 'All';
-
-  // ✅ NEW: To manage Year Selection
   List<int> _availableYears = [];
   int _selectedYear = DateTime.now().year;
 
@@ -61,26 +60,21 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
     }
   }
 
-  // ✅ NEW: Extract Years and Sort Data
   void _processData(List<Installment> list) {
     if (!mounted) return;
 
-    // 1. Sort Descending
     list.sort((a, b) {
       int yearComp = (b.periodYear ?? 0).compareTo(a.periodYear ?? 0);
       if (yearComp != 0) return yearComp;
       return (b.periodMonth ?? 0).compareTo(a.periodMonth ?? 0);
     });
 
-    // 2. Extract Unique Years
     final years = list.map((e) => e.periodYear ?? DateTime.now().year).toSet().toList();
-    years.sort((a, b) => b.compareTo(a)); // Newest year first
+    years.sort((a, b) => b.compareTo(a));
 
     setState(() {
       _installments = list;
       _availableYears = years;
-
-      // Select the first available year if current selection is invalid
       if (_availableYears.isNotEmpty && !_availableYears.contains(_selectedYear)) {
         _selectedYear = _availableYears.first;
       }
@@ -98,227 +92,110 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
       DataManager().invalidatePlayerDetails(widget.player.id);
       _loadData();
     }
-  }void _openBulkPayment(double maxPayableAmount) {
+  }
+
+  void _openBulkPayment(double maxPayableAmount) {
     final amountCtl = TextEditingController();
     final methodCtl = TextEditingController();
     final refCtl = TextEditingController();
 
     showDialog(
       context: context,
-      barrierColor: Colors.black.withOpacity(0.8), // Background dimming
       builder: (ctx) => Dialog(
-        backgroundColor: Colors.transparent, // Custom Background sathi transparent
-        insetPadding: const EdgeInsets.all(20),
+        backgroundColor: Colors.transparent,
         child: Container(
           decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Color(0xFF0F2027), // Deep Black-Blue
-                Color(0xFF203A43), // Slate
-                Color(0xFF2C5364), // Teal-Dark
-              ],
-            ),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: Colors.white.withOpacity(0.1)),
-            boxShadow: [
-              BoxShadow(color: Colors.cyanAccent.withOpacity(0.2), blurRadius: 20, spreadRadius: 2)
-            ],
+            gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF0F2027), Color(0xFF203A43)]),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.white12),
           ),
-          child: SingleChildScrollView(
-            child: Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text("BULK PAYMENT", style: TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
+              const SizedBox(height: 20),
+              _neonDialogInput(amountCtl, "Amount (Max ₹${maxPayableAmount.toInt()})", Icons.attach_money, isNumber: true),
+              const SizedBox(height: 12),
+              _neonDialogInput(methodCtl, "Payment Method (e.g. UPI)", Icons.payment),
+              const SizedBox(height: 12),
+              _neonDialogInput(refCtl, "Reference (Optional)", Icons.note),
+              const SizedBox(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  // --- HEADER ---
-                  Text(
-                    _currentFilter == 'Overdue' ? "PAY OVERDUE" : "BULK PAYMENT",
-                    style: TextStyle(
-                        color: Colors.white.withOpacity(0.7),
-                        fontSize: 12,
-                        letterSpacing: 1.5,
-                        fontWeight: FontWeight.bold
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    "₹${maxPayableAmount.toStringAsFixed(0)}",
-                    style: TextStyle(
-                        fontSize: 36,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.cyanAccent,
-                        shadows: [Shadow(color: Colors.cyanAccent.withOpacity(0.6), blurRadius: 15)]
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 4),
-                  Center(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
-                      child: Text("Total Payable", style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 10)),
-                    ),
-                  ),
-                  const SizedBox(height: 30),
+                  TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("CANCEL", style: TextStyle(color: Colors.white54))),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: () async {
+                      final amount = double.tryParse(amountCtl.text);
+                      final method = methodCtl.text.trim().isEmpty ? null : methodCtl.text.trim();
+                      final ref = refCtl.text.trim().isEmpty ? null : refCtl.text.trim();
 
-                  // --- INPUTS ---
-                  TextField(
-                    controller: amountCtl,
-                    keyboardType: TextInputType.number,
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
-                    decoration: _neonInputDecoration("Enter Amount", Icons.attach_money),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: methodCtl,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: _neonInputDecoration("Payment Method (e.g. Cash)", Icons.payment),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: refCtl,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: _neonInputDecoration("Reference / Note", Icons.note_alt_outlined),
-                  ),
-
-                  const SizedBox(height: 30),
-
-                  // --- BUTTONS ---
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextButton(
-                          onPressed: () => Navigator.pop(ctx),
-                          child: Text("CANCEL", style: TextStyle(color: Colors.white.withOpacity(0.5), fontWeight: FontWeight.bold)),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        flex: 2,
-                        child: Container(
-                          decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(15),
-                              gradient: const LinearGradient(colors: [Colors.blueAccent, Colors.purpleAccent]),
-                              boxShadow: [BoxShadow(color: Colors.blueAccent.withOpacity(0.4), blurRadius: 10)]
-                          ),
-                          child: ElevatedButton(
-                            onPressed: () async {
-                              final amount = double.tryParse(amountCtl.text);
-                              final method = methodCtl.text.trim().isEmpty ? null : methodCtl.text.trim();
-                              final ref = refCtl.text.trim().isEmpty ? null : refCtl.text.trim();
-
-                              if (amount == null || amount <= 0) return;
-                              if (amount > maxPayableAmount) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text("Amount cannot exceed displayed dues"), backgroundColor: Colors.red)
-                                );
-                                return;
-                              }
-
-                              Navigator.pop(ctx);
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text("Processing ₹$amount..."), backgroundColor: Colors.blueAccent)
-                              );
-
-                              try {
-                                if (_currentFilter == 'Overdue') {
-                                  await ApiService.payOverdue(
-                                      playerId: widget.player.id,
-                                      amount: amount,
-                                      paymentMethod: method,
-                                      reference: ref
-                                  );
-                                } else {
-                                  await ApiService.payUnpaid(
-                                      playerId: widget.player.id,
-                                      amount: amount,
-                                      paymentMethod: method,
-                                      reference: ref
-                                  );
-                                }
-
-                                if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(content: Text("Payment Successful!"), backgroundColor: Colors.green)
-                                  );
-                                  DataManager().invalidatePlayerDetails(widget.player.id);
-                                  _loadData();
-                                }
-                              } catch (e) {
-                                if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text("Failed: $e"), backgroundColor: Colors.redAccent)
-                                  );
-                                }
-                              }
-                            },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.transparent,
-                              shadowColor: Colors.transparent,
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                            ),
-                            child: const Text("CONFIRM PAYMENT", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                          ),
-                        ),
-                      ),
-                    ],
+                      if (amount == null || amount <= 0 || amount > maxPayableAmount) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Invalid Amount"), backgroundColor: Colors.red));
+                        return;
+                      }
+                      Navigator.pop(ctx);
+                      try {
+                        if (_currentFilter == 'Overdue') {
+                          await ApiService.payOverdue(playerId: widget.player.id, amount: amount, paymentMethod: method, reference: ref);
+                        } else {
+                          await ApiService.payUnpaid(playerId: widget.player.id, amount: amount, paymentMethod: method, reference: ref);
+                        }
+                        DataManager().invalidatePlayerDetails(widget.player.id);
+                        _loadData();
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Payment Successful!"), backgroundColor: Colors.green));
+                      } catch (e) {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Failed: $e"), backgroundColor: Colors.red));
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.cyanAccent, foregroundColor: Colors.black),
+                    child: const Text("PAY NOW"),
                   )
                 ],
-              ),
-            ),
+              )
+            ],
           ),
         ),
       ),
     );
   }
-// --- HELPER: NEON INPUT DECORATION ---
-  InputDecoration _neonInputDecoration(String label, IconData icon) {
-    return InputDecoration(
-      labelText: label,
-      labelStyle: TextStyle(color: Colors.white.withOpacity(0.6)),
-      prefixIcon: Icon(icon, color: Colors.cyanAccent.withOpacity(0.7)),
-      filled: true,
-      fillColor: Colors.black.withOpacity(0.3),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(15),
-        borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(15),
-        borderSide: const BorderSide(color: Colors.cyanAccent, width: 2), // GLOW EFFECT
+
+  Widget _neonDialogInput(TextEditingController ctl, String label, IconData icon, {bool isNumber = false}) {
+    return TextField(
+      controller: ctl,
+      keyboardType: isNumber ? TextInputType.number : TextInputType.text,
+      style: const TextStyle(color: Colors.white),
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
+        prefixIcon: Icon(icon, color: Colors.cyanAccent),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.white.withOpacity(0.1))),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.cyanAccent)),
+        filled: true,
+        fillColor: Colors.black26,
       ),
     );
   }
-  // ✅ FILTER LOGIC: Apply Overdue Filter AND Year Filter
+
   List<Installment> _getFilteredList() {
     return _installments.where((it) {
-      // 1. Year Filter
       if (it.periodYear != _selectedYear) return false;
-
-      // 2. Overdue Filter (if active)
       if (_currentFilter == 'Overdue') {
         final now = DateTime.now();
         final today = DateTime(now.year, now.month, now.day);
         final double remaining = (it.amount ?? 0) - (it.paidAmount ?? 0);
         final bool isPaid = (it.status ?? '').toUpperCase() == 'PAID';
-
         return remaining > 0 && !isPaid && it.dueDate != null && it.dueDate!.isBefore(today);
       }
-
       return true;
     }).toList();
   }
 
   @override
   Widget build(BuildContext context) {
-    const bg = Color(0xFFF5F7FA);
     final displayList = _getFilteredList();
-
     double totalPendingOnScreen = 0;
     for (var i in displayList) {
       double total = i.amount ?? 0;
@@ -327,142 +204,129 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
     }
 
     return Scaffold(
-      backgroundColor: bg,
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(widget.player.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Text(widget.player.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
             Text(
-              _currentFilter == 'Overdue' ? 'Overdue Installments' : 'History',
-              style: TextStyle(fontSize: 12, color: _currentFilter == 'Overdue' ? Colors.red : Colors.grey),
+              _currentFilter == 'Overdue' ? 'Overdue Only' : 'History',
+              style: TextStyle(fontSize: 12, color: _currentFilter == 'Overdue' ? Colors.redAccent : Colors.white70),
             ),
           ],
         ),
-        elevation: 0,
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black87,
         actions: [
-          TextButton.icon(
+          IconButton(
             onPressed: () => setState(() => _currentFilter = _currentFilter == 'Overdue' ? 'All' : 'Overdue'),
-            icon: Icon(_currentFilter == 'Overdue' ? Icons.list : Icons.warning, size: 18),
-            label: Text(_currentFilter == 'Overdue' ? "Show All" : "Show Overdue"),
+            icon: Icon(_currentFilter == 'Overdue' ? Icons.list : Icons.warning_amber_rounded, color: _currentFilter == 'Overdue' ? Colors.white : Colors.orangeAccent),
           ),
-          Padding(
-            padding: const EdgeInsets.only(right: 8.0),
-            child: IconButton(
-              onPressed: _openCreate,
-              icon: const Icon(Icons.add_circle_outline, color: Colors.deepPurple, size: 28),
-            ),
+          IconButton(
+            onPressed: _openCreate,
+            icon: const Icon(Icons.add_circle_outline, color: Colors.cyanAccent),
           ),
         ],
       ),
-
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Colors.deepPurple))
-          : _error != null
-          ? Center(child: Text('Error: $_error'))
-          : Column(
+      body: Stack(
         children: [
+          // Background
+          Container(decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF0F2027), Color(0xFF203A43), Color(0xFF2C5364)]))),
 
-          // ✅ NEW: Year Selection Chips
-          if (_availableYears.isNotEmpty)
-            Container(
-              height: 60,
-              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
-              color: Colors.white,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: _availableYears.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 10),
-                itemBuilder: (context, index) {
-                  final year = _availableYears[index];
-                  final isSelected = year == _selectedYear;
+          SafeArea(
+            child: Column(
+              children: [
+                // Year Chips
+                // Year List Section (Horizontal Scroll)
+                if (_availableYears.isNotEmpty)
+                  SizedBox(
+                    height: 60,
+                    child: ListView.separated(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _availableYears.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 10),
+                      itemBuilder: (context, index) {
+                        final year = _availableYears[index];
+                        final isSelected = year == _selectedYear;
 
-                  return ChoiceChip(
-                    label: Text(year.toString()),
-                    selected: isSelected,
-                    onSelected: (bool selected) {
-                      if (selected) {
-                        setState(() => _selectedYear = year);
-                      }
-                    },
-                    selectedColor: Colors.deepPurple,
-                    backgroundColor: Colors.grey.shade100,
-                    labelStyle: TextStyle(
-                        color: isSelected ? Colors.white : Colors.black87,
-                        fontWeight: FontWeight.bold
-                    ),
-                  );
-                },
-              ),
-            ),
+                        return ChoiceChip(
+                          label: Text(year.toString()),
+                          selected: isSelected,
+                          showCheckmark: false, // Checkmark नको, क्लीन लूकसाठी
 
-          // Total Header
-          if (totalPendingOnScreen > 0)
-            Container(
-              padding: const EdgeInsets.all(16),
-              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), // Added margin
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12), // Rounded corners
-                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 5, offset: const Offset(0, 3))],
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                          "Total Pending ($_selectedYear)", // Show year in label
-                          style: const TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.bold)
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        "₹${totalPendingOnScreen.toStringAsFixed(0)}",
-                        style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: Colors.redAccent),
-                      ),
-                    ],
-                  ),
-                  ElevatedButton.icon(
-                    onPressed: () => _openBulkPayment(totalPendingOnScreen),
-                    icon: const Icon(Icons.payments, size: 18),
-                    label: const Text("Pay Now"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.deepPurple,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          onSelected: (val) { if (val) setState(() => _selectedYear = year); },
+
+                          // --- COLORS ---
+                          selectedColor: Colors.cyanAccent,
+                          // Unselected असताना Dark Translucent रंग (आता White दिसणार नाही)
+                          backgroundColor: Colors.black.withOpacity(0.3),
+
+                          // --- BORDER ---
+                          // Unselected असताना White Border, Selected असताना Cyan Border
+                          side: BorderSide(
+                              color: isSelected ? Colors.cyanAccent : Colors.white.withOpacity(0.3),
+                              width: 1.5
+                          ),
+
+                          // --- TEXT STYLE ---
+                          labelStyle: TextStyle(
+                              color: isSelected ? Colors.black : Colors.white, // Selected: Black, Unselected: White
+                              fontWeight: FontWeight.bold
+                          ),
+
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                        );
+                      },
                     ),
                   ),
-                ],
-              ),
-            ),
 
-          // List
-          Expanded(
-            child: RefreshIndicator(
-              onRefresh: _loadData,
-              child: displayList.isEmpty
-                  ? Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.calendar_month_outlined, size: 64, color: Colors.grey.shade300),
-                    const SizedBox(height: 16),
-                    Text('No data for $_selectedYear', style: TextStyle(color: Colors.grey.shade600)),
-                  ],
+                // Total Pending Card
+                if (totalPendingOnScreen > 0)
+                  Container(
+                    margin: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.redAccent.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: Colors.redAccent.withOpacity(0.3)),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text("Total Pending ($_selectedYear)", style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
+                            const SizedBox(height: 4),
+                            Text("₹${totalPendingOnScreen.toStringAsFixed(0)}", style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                        ElevatedButton.icon(
+                          onPressed: () => _openBulkPayment(totalPendingOnScreen),
+                          style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+                          icon: const Icon(Icons.payment, size: 18),
+                          label: const Text("PAY ALL"),
+                        )
+                      ],
+                    ),
+                  ),
+
+                // List
+                Expanded(
+                  child: _isLoading
+                      ? const Center(child: CircularProgressIndicator(color: Colors.cyanAccent))
+                      : displayList.isEmpty
+                      ? const Center(child: Text("No records found", style: TextStyle(color: Colors.white54)))
+                      : ListView.builder(
+                    padding: const EdgeInsets.only(bottom: 80),
+                    itemCount: displayList.length,
+                    itemBuilder: (ctx, i) => _buildGlassCard(displayList[i]),
+                  ),
                 ),
-              )
-                  : ListView.builder(
-                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-                itemCount: displayList.length,
-                itemBuilder: (context, i) {
-                  final item = displayList[i];
-                  return _buildInstallmentCard(item);
-                },
-              ),
+              ],
             ),
           ),
         ],
@@ -470,177 +334,94 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
     );
   }
 
-  Widget _buildInstallmentCard(Installment it) {
-    // ... (Keep existing UI logic exactly same) ...
+  Widget _buildGlassCard(Installment it) {
     final double total = it.amount ?? 0.0;
     final double paid = it.paidAmount ?? 0.0;
-    final double remaining = total - paid;
-    final bool isPaid = remaining <= 0;
+    final bool isPaid = (total - paid) <= 0;
     final bool isOverdue = !isPaid && it.dueDate != null && it.dueDate!.isBefore(DateTime.now());
 
-    String statusText = (it.status ?? 'PENDING').replaceAll('_', ' ');
-    Color statusColor = Colors.blue;
-    Color statusBg = Colors.blue.shade50;
+    Color statusColor = isPaid ? Colors.greenAccent : (isOverdue ? Colors.redAccent : Colors.orangeAccent);
+    String statusText = isPaid ? "PAID" : (isOverdue ? "OVERDUE" : "PENDING");
 
-    if (isPaid) {
-      statusText = "PAID";
-      statusColor = Colors.green;
-      statusBg = Colors.green.shade50;
-    } else if (isOverdue) {
-      statusText = "OVERDUE";
-      statusColor = Colors.red;
-      statusBg = Colors.red.shade50;
-    } else if (paid > 0) {
-      statusText = "PARTIAL";
-      statusColor = Colors.orange;
-      statusBg = Colors.orange.shade50;
-    }
-
-    final periodLabel = '${it.periodMonth}/${it.periodYear}';
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      decoration: BoxDecoration(
-        color: Colors.white,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: ClipRRect(
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          )
-        ],
-        border: Border(left: BorderSide(color: statusColor, width: 4)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  periodLabel,
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: statusBg,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: statusColor.withOpacity(0.3)),
-                  ),
-                  child: Text(
-                    statusText,
-                    style: TextStyle(color: statusColor, fontWeight: FontWeight.w700, fontSize: 11),
-                  ),
-                ),
-              ],
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white.withOpacity(0.1)),
             ),
-            const SizedBox(height: 16),
-            Row(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Total Amount', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                      const SizedBox(height: 4),
-                      Text('₹${total.toStringAsFixed(0)}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Paid', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                      const SizedBox(height: 4),
-                      Text(
-                        '₹${paid.toStringAsFixed(0)}',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.green.shade700),
-                      ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      const Text('Due Date', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                      const SizedBox(height: 4),
-                      Text(
-                        it.dueDate != null ? df.format(it.dueDate!) : '—',
-                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: isOverdue ? Colors.red : Colors.black87),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => PaymentsListScreen(
-                            installmentId: it.id,
-                            remainingAmount: remaining,
-                          ),
-                        ),
-                      );
-                    },
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.black87,
-                      side: BorderSide(color: Colors.grey.shade300),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      '${DateFormat('MMM').format(DateTime(0, it.periodMonth ?? 1))} ${it.periodYear}',
+                      style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
                     ),
-                    icon: const Icon(Icons.history, size: 18, color: Colors.grey),
-                    label: const Text('History'),
-                  ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(color: statusColor.withOpacity(0.2), borderRadius: BorderRadius.circular(8), border: Border.all(color: statusColor)),
+                      child: Text(statusText, style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.bold)),
+                    )
+                  ],
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: isPaid
-                        ? null
-                        : () async {
-                      final result = await Navigator.push<bool>(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => RecordPaymentScreen(
-                            installmentId: it.id,
-                            remainingAmount: remaining,
-                          ),
-                        ),
-                      );
-                      if (result == true) {
-                        DataManager().invalidatePlayerDetails(widget.player.id);
-                        _loadData();
-                      }
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.deepPurple,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    _infoCol("Amount", "₹${total.toInt()}", Colors.white),
+                    _infoCol("Paid", "₹${paid.toInt()}", Colors.greenAccent),
+                    _infoCol("Due Date", it.dueDate != null ? df.format(it.dueDate!) : "-", isOverdue ? Colors.redAccent : Colors.white70),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PaymentsListScreen(installmentId: it.id, remainingAmount: total - paid))),
+                        style: OutlinedButton.styleFrom(side: BorderSide(color: Colors.white24), foregroundColor: Colors.white),
+                        child: const Text("History"),
+                      ),
                     ),
-                    icon: const Icon(Icons.add_card, size: 18),
-                    label: const Text('Record'),
-                  ),
-                ),
+                    const SizedBox(width: 12),
+                    if (!isPaid)
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () async {
+                            final res = await Navigator.push(context, MaterialPageRoute(builder: (_) => RecordPaymentScreen(installmentId: it.id, remainingAmount: total - paid)));
+                            if (res == true) { DataManager().invalidatePlayerDetails(widget.player.id); _loadData(); }
+                          },
+                          style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurpleAccent, foregroundColor: Colors.white),
+                          child: const Text("Record"),
+                        ),
+                      )
+                  ],
+                )
               ],
             ),
-          ],
+          ),
         ),
       ),
+    );
+  }
+
+  Widget _infoCol(String label, String value, Color valColor) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: const TextStyle(color: Colors.white54, fontSize: 11)),
+        const SizedBox(height: 2),
+        Text(value, style: TextStyle(color: valColor, fontWeight: FontWeight.bold, fontSize: 14)),
+      ],
     );
   }
 }

@@ -1,28 +1,23 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../../models/group.dart';
 import '../../services/api_service.dart';
-import '../../services/data_manager.dart'; // ✅ Import DataManager
+import '../../services/data_manager.dart';
 
 class CreateFeeScreen extends StatefulWidget {
   const CreateFeeScreen({super.key});
-
   @override
   State<CreateFeeScreen> createState() => _CreateFeeScreenState();
 }
 
 class _CreateFeeScreenState extends State<CreateFeeScreen> {
   final _formKey = GlobalKey<FormState>();
-
   List<Group> _groups = [];
-  // ✅ FIX: Use ID (int) instead of Object (Group)
   int? _selectedGroupId;
-
   final _feeCtl = TextEditingController();
   DateTime? _effectiveFrom;
   DateTime? _effectiveTo;
   bool _loading = true;
-  bool _submitting = false;
-  String? _error;
 
   @override
   void initState() {
@@ -32,171 +27,120 @@ class _CreateFeeScreenState extends State<CreateFeeScreen> {
 
   Future<void> _loadGroups() async {
     try {
-      // 1. Try Cache First
-      var groups = await DataManager().getGroups();
-
-      // If cache empty, try force fetch
-      if (groups.isEmpty) {
-        groups = await DataManager().getGroups(forceRefresh: true);
-      }
-
-      if (mounted) {
-        setState(() {
-          _groups = groups;
-          // ✅ FIX: Automatically select the first ID if valid
-          if (groups.isNotEmpty) {
-            // Only set default if nothing selected yet or selected is invalid
-            if (_selectedGroupId == null || !_groups.any((g) => g.id == _selectedGroupId)) {
-              _selectedGroupId = groups.first.id;
-            }
-          }
-          _loading = false;
-        });
-      }
+      var groups = await DataManager().getGroups(forceRefresh: true);
+      if (mounted) setState(() { _groups = groups; if (groups.isNotEmpty) _selectedGroupId = groups.first.id; _loading = false; });
     } catch (e) {
-      if (mounted) setState(() { _error = '$e'; _loading = false; });
+      if (mounted) setState(() => _loading = false);
     }
   }
 
-  Future<void> _pickDate(BuildContext ctx, bool isFrom) async {
-    final now = DateTime.now();
-    final initial = isFrom ? (_effectiveFrom ?? now) : (_effectiveTo ?? now);
+  Future<void> _pickDate(bool isFrom) async {
     final picked = await showDatePicker(
-      context: ctx,
-      initialDate: initial,
-      firstDate: DateTime(now.year - 5),
-      lastDate: DateTime(now.year + 5),
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+      builder: (ctx, child) => Theme(data: ThemeData.dark().copyWith(colorScheme: const ColorScheme.dark(primary: Colors.cyanAccent, onPrimary: Colors.black, surface: Color(0xFF203A43))), child: child!),
     );
-    if (picked != null) {
-      setState(() {
-        if (isFrom) _effectiveFrom = picked;
-        else _effectiveTo = picked;
-      });
-    }
+    if (picked != null) setState(() { if (isFrom) _effectiveFrom = picked; else _effectiveTo = picked; });
   }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    if (_selectedGroupId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please select group')));
-      return;
-    }
+    if (_selectedGroupId == null) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Select Group'))); return; }
 
-    setState(() => _submitting = true);
     try {
-      final fee = double.parse(_feeCtl.text.trim());
-
-      // ✅ FIX: Use the selected ID directly
-      final createdFee = await ApiService.createFeeStructure(
+      await ApiService.createFeeStructure(
         groupId: _selectedGroupId!,
-        monthlyFee: fee,
+        monthlyFee: double.parse(_feeCtl.text.trim()),
         effectiveFrom: _effectiveFrom,
         effectiveTo: _effectiveTo,
       );
-
-      // Refresh cache so the list screen updates
       DataManager().invalidateFees();
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Fee ₹${createdFee.monthlyFee} created for ${createdFee.groupName}')),
-      );
-      Navigator.of(context).pop(true);
-
+      if (mounted) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Created Successfully'), backgroundColor: Colors.green)); Navigator.pop(context); }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Create failed: $e')));
-    } finally {
-      if (mounted) setState(() => _submitting = false);
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.redAccent));
     }
-  }
-
-  @override
-  void dispose() {
-    _feeCtl.dispose();
-    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
-
-    if (_error != null) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Create Fee')),
-        body: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('Error: $_error'),
-                const SizedBox(height: 10),
-                ElevatedButton(onPressed: _loadGroups, child: const Text("Retry"))
-              ],
-            )
-        ),
-      );
-    }
-
     return Scaffold(
-      appBar: AppBar(title: const Text('Create Fee Structure')),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            children: [
-              // ✅ FIXED DROPDOWN
-              DropdownButtonFormField<int>(
-                value: _selectedGroupId,
-                items: _groups.map((g) => DropdownMenuItem<int>(
-                  value: g.id, // Store ID
-                  child: Text(g.name),
-                )).toList(),
-                onChanged: (id) => setState(() => _selectedGroupId = id),
-                decoration: const InputDecoration(labelText: 'Group', border: OutlineInputBorder()),
-                validator: (v) => v == null ? 'Choose a group' : null,
-              ),
-
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _feeCtl,
-                decoration: const InputDecoration(labelText: 'Monthly Fee', border: OutlineInputBorder()),
-                keyboardType: TextInputType.number,
-                validator: (v) => (v == null || double.tryParse(v) == null) ? 'Enter valid amount' : null,
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      icon: const Icon(Icons.calendar_today),
-                      label: Text(_effectiveFrom == null ? 'Start Date' : _effectiveFrom!.toString().split(' ')[0]),
-                      onPressed: () => _pickDate(context, true),
+      extendBodyBehindAppBar: true,
+      appBar: AppBar(title: const Text('Create Fee', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)), backgroundColor: Colors.transparent, elevation: 0, iconTheme: const IconThemeData(color: Colors.white)),
+      body: Stack(
+        children: [
+          Container(decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF0F2027), Color(0xFF203A43), Color(0xFF2C5364)]))),
+          SafeArea(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator(color: Colors.cyanAccent))
+                : SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                  child: Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(color: Colors.white.withOpacity(0.05), borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.white.withOpacity(0.1))),
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        children: [
+                          DropdownButtonFormField<int>(
+                            value: _selectedGroupId,
+                            dropdownColor: const Color(0xFF2C5364),
+                            style: const TextStyle(color: Colors.white),
+                            decoration: _inputDeco('Group', Icons.group),
+                            items: _groups.map((g) => DropdownMenuItem(value: g.id, child: Text(g.name))).toList(),
+                            onChanged: (val) => setState(() => _selectedGroupId = val),
+                          ),
+                          const SizedBox(height: 16),
+                          TextFormField(controller: _feeCtl, keyboardType: TextInputType.number, style: const TextStyle(color: Colors.white), decoration: _inputDeco('Monthly Fee', Icons.attach_money)),
+                          const SizedBox(height: 16),
+                          Row(children: [
+                            Expanded(child: _dateButton(_effectiveFrom, true)),
+                            const SizedBox(width: 10),
+                            Expanded(child: _dateButton(_effectiveTo, false)),
+                          ]),
+                          const SizedBox(height: 30),
+                          SizedBox(width: double.infinity, child: ElevatedButton(onPressed: _submit, style: ElevatedButton.styleFrom(backgroundColor: Colors.cyanAccent, foregroundColor: Colors.black, padding: const EdgeInsets.symmetric(vertical: 16)), child: const Text('CREATE', style: TextStyle(fontWeight: FontWeight.bold))))
+                        ],
+                      ),
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      icon: const Icon(Icons.event),
-                      label: Text(_effectiveTo == null ? 'End Date' : _effectiveTo!.toString().split(' ')[0]),
-                      onPressed: () => _pickDate(context, false),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: ElevatedButton(
-                  onPressed: _submitting ? null : _submit,
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple, foregroundColor: Colors.white),
-                  child: _submitting ? const CircularProgressIndicator(color: Colors.white) : const Text('Create Fee'),
                 ),
               ),
-            ],
+            ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _dateButton(DateTime? date, bool isFrom) {
+    return GestureDetector(
+      onTap: () => _pickDate(isFrom),
+      child: Container(
+        height: 55,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(color: Colors.black.withOpacity(0.3), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white.withOpacity(0.1))),
+        child: Row(
+          children: [
+            const Icon(Icons.calendar_today, color: Colors.cyanAccent, size: 18),
+            const SizedBox(width: 8),
+            Text(date == null ? (isFrom ? 'Start Date' : 'End Date') : date.toString().split(' ')[0], style: const TextStyle(color: Colors.white)),
+          ],
         ),
       ),
+    );
+  }
+
+  InputDecoration _inputDeco(String label, IconData icon) {
+    return InputDecoration(
+      labelText: label, labelStyle: TextStyle(color: Colors.white.withOpacity(0.6)), prefixIcon: Icon(icon, color: Colors.cyanAccent), filled: true, fillColor: Colors.black.withOpacity(0.3),
+      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.white.withOpacity(0.1))),
+      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.cyanAccent)),
     );
   }
 }
