@@ -3,7 +3,6 @@ import '../../models/player.dart';
 import '../../models/player_installment_summary.dart';
 import '../../services/api_service.dart';
 import '../../services/data_manager.dart';
-// ✅ Note: Ensure these file names match your project (lowercase is standard)
 import '../../widgets/FinancialSummaryCard.dart';
 import '../../widgets/PlayerSummaryCard.dart';
 
@@ -106,7 +105,6 @@ class _OverduePlayersScreenState extends State<OverduePlayersScreen> {
   }
 
   // --- 2. HEADER LOGIC (All History Stats) ---
-  // ✅ FIX: This now calculates stats from ALL items, not just the filtered list
   Map<String, double> _calculateGlobalOverdueStats() {
     double totalTarget = 0;
     double totalCollected = 0;
@@ -116,8 +114,6 @@ class _OverduePlayersScreenState extends State<OverduePlayersScreen> {
     final startOfToday = DateTime(now.year, now.month, now.day);
 
     for (var item in _allItems) {
-      // Logic: If the Due Date is in the past, include it in stats
-      // (Even if it is fully PAID now, we want to show it in Collected)
       if (item.dueDate != null && item.dueDate!.isBefore(startOfToday)) {
         totalTarget += (item.installmentAmount ?? 0);
         totalCollected += item.totalPaid;
@@ -130,58 +126,113 @@ class _OverduePlayersScreenState extends State<OverduePlayersScreen> {
   @override
   Widget build(BuildContext context) {
     final overdueList = _getOverdueGroups();
-
-    // ✅ Calculate Stats independently
     final stats = _calculateGlobalOverdueStats();
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FA),
+      extendBodyBehindAppBar: true, // Needed for gradient background
       appBar: AppBar(
-        title: Text('Overdue Players (${overdueList.length})', style: const TextStyle(fontWeight: FontWeight.bold)),
-        backgroundColor: Colors.white,
+        title: Text('Overdue Players (${overdueList.length})', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+        centerTitle: true,
+        backgroundColor: Colors.transparent,
         elevation: 0,
-        foregroundColor: Colors.black87,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
+          icon: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.black26),
+            child: const Icon(Icons.arrow_back_ios_new, size: 18, color: Colors.white),
+          ),
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadData),
+          IconButton(icon: const Icon(Icons.refresh, color: Colors.white), onPressed: _loadData),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-        onRefresh: _loadData,
-        child: ListView.builder(
-          padding: const EdgeInsets.only(top: 0, bottom: 80),
-          itemCount: overdueList.length + 1,
-          itemBuilder: (ctx, i) {
-            // 1. Show Header (Global Stats)
-            if (i == 0) {
-              return FinancialSummaryCard(
-                title: "Total Past Dues", // Changed title to reflect data better
-                totalTarget: stats['target']!,
-                totalCollected: stats['collected']!,
-                totalPending: stats['pending']!,
-                countLabel: "${overdueList.length} Active", // Shows only currently pending count
-              );
-            }
-
-            // 2. Show List Items (Active Overdue Only)
-            final data = overdueList[i - 1];
-
-            return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: PlayerSummaryCard(
-                player: data['player'] as Player,
-                summary: data['summary'] as PlayerInstallmentSummary,
-                installments: data['installments'] as List<PlayerInstallmentSummary>,
-                nextScreenFilter: 'Overdue',
+      body: Stack(
+        children: [
+          // 1. BACKGROUND GRADIENT (Deep Space)
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color(0xFF0F2027), // Deep Black-Blue
+                  Color(0xFF203A43), // Slate
+                  Color(0xFF2C5364), // Teal-Dark
+                ],
               ),
-            );
-          },
-        ),
+            ),
+          ),
+
+          // 2. GLOWING ORBS (Visual Effects)
+          Positioned(
+            top: -50, right: -50,
+            child: Container(
+              height: 200, width: 200,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.redAccent.withOpacity(0.15), boxShadow: [BoxShadow(color: Colors.redAccent.withOpacity(0.2), blurRadius: 100, spreadRadius: 50)]),
+            ),
+          ),
+          Positioned(
+            bottom: 100, left: -50,
+            child: Container(
+              height: 200, width: 200,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.purple.withOpacity(0.2), boxShadow: [BoxShadow(color: Colors.purple.withOpacity(0.2), blurRadius: 100, spreadRadius: 50)]),
+            ),
+          ),
+
+          // 3. MAIN CONTENT
+          SafeArea(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator(color: Colors.cyanAccent))
+                : overdueList.isEmpty
+                ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.check_circle_outline, size: 80, color: Colors.white.withOpacity(0.2)),
+                  const SizedBox(height: 16),
+                  Text("No Overdue Players!", style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 18, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  Text("Everything looks clean.", style: TextStyle(color: Colors.white.withOpacity(0.4))),
+                ],
+              ),
+            )
+                : RefreshIndicator(
+              onRefresh: _loadData,
+              color: Colors.cyanAccent,
+              backgroundColor: const Color(0xFF203A43),
+              child: ListView.builder(
+                padding: const EdgeInsets.only(top: 10, bottom: 80),
+                itemCount: overdueList.length + 1,
+                itemBuilder: (ctx, i) {
+                  // 1. Show Header (Global Stats)
+                  if (i == 0) {
+                    return FinancialSummaryCard(
+                      title: "Total Past Dues",
+                      totalTarget: stats['target']!,
+                      totalCollected: stats['collected']!,
+                      totalPending: stats['pending']!,
+                      countLabel: "${overdueList.length} Active",
+                    );
+                  }
+
+                  // 2. Show List Items
+                  final data = overdueList[i - 1];
+
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: PlayerSummaryCard(
+                      player: data['player'] as Player,
+                      summary: data['summary'] as PlayerInstallmentSummary,
+                      installments: data['installments'] as List<PlayerInstallmentSummary>,
+                      nextScreenFilter: 'Overdue',
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -435,17 +435,23 @@ class ApiService {
       throw Exception('Failed to load overdue summary: ${response.statusCode} - ${response.body}');
     }
   }
-  static Future<void> payOverdue({required int playerId, required double amount}) async {
+  static Future<void> payOverdue({
+    required int playerId,
+    required double amount,
+    String? paymentMethod,
+    String? reference,
+  }) async {
     final url = Uri.parse('$baseUrl/api/payments/pay-overdue');
+
+    // Body madhye passed values wapra
     final body = {
       'playerId': playerId,
       'amount': amount,
-      'paymentMethod': 'Cash'
+      if (paymentMethod != null) 'paymentMethod': paymentMethod,
+      if (reference != null) 'reference': reference,
     };
 
-    // DEBUG: Print request details
-    print('📤 PAYOVERDUE REQUEST:');
-    print('URL: $url');
+    print('📤 PAY OVERDUE REQUEST:');
     print('Body: $body');
 
     try {
@@ -455,20 +461,12 @@ class ApiService {
         body: json.encode(body),
       );
 
-      // DEBUG: Print response details
-      print('📥 PAYOVERDUE RESPONSE:');
-      print('Status Code: ${response.statusCode}');
-      print('Headers: ${response.headers}');
-      print('Body: ${response.body}');
-
       if (response.statusCode != 200) {
-        print('❌ ERROR: Status code is not 200');
-        throw Exception('Failed to record overdue payment: ${response.statusCode} - ${response.body}');
+        throw Exception('Failed to record overdue payment: ${response.body}');
       }
-
-      print('✅ PAYOVERDUE SUCCESS!');
+      print('✅ PAY OVERDUE SUCCESS!');
     } catch (e) {
-      print('❌ NETWORK ERROR: $e');
+      print('❌ ERROR: $e');
       rethrow;
     }
   }
@@ -484,16 +482,23 @@ class ApiService {
       throw Exception('Failed to update player: ${response.body}');
     }
   }
-  static Future<void> payUnpaid({required int playerId, required double amount}) async {
+  static Future<void> payUnpaid({
+    required int playerId,
+    required double amount,
+    String? paymentMethod, // Ha parameter add kela
+    String? reference,     // Ha parameter add kela
+  }) async {
     final url = Uri.parse('$baseUrl/api/payments/pay-unpaid');
+
+    // Body madhye passed values wapra
     final body = {
       'playerId': playerId,
       'amount': amount,
-      'paymentMethod': 'Cash'
+      if (paymentMethod != null) 'paymentMethod': paymentMethod,
+      if (reference != null) 'reference': reference,
     };
 
     print('📤 PAY UNPAID REQUEST:');
-    print('URL: $url');
     print('Body: $body');
 
     try {
@@ -503,15 +508,10 @@ class ApiService {
         body: json.encode(body),
       );
 
-      print('📥 PAY UNPAID RESPONSE:');
-      print('Status Code: ${response.statusCode}');
-      print('Body: ${response.body}');
-
       if (response.statusCode != 200) {
         throw Exception('Failed to record payment: ${response.body}');
       }
-
-      print('✅ PAYMENT SUCCESS!');
+      print('✅ PAY UNPAID SUCCESS!');
     } catch (e) {
       print('❌ ERROR: $e');
       rethrow;

@@ -35,8 +35,32 @@ class _PlayerSummaryCardState extends State<PlayerSummaryCard> {
     final bool isOverdue = remaining > 0;
     final Color statusColor = isOverdue ? Colors.red : Colors.green;
 
-    final sortedInstallments = List<PlayerInstallmentSummary>.from(widget.installments)
-      ..sort((a, b) => (a.dueDate ?? DateTime(2000)).compareTo(b.dueDate ?? DateTime(2000)));
+    // 1. Copy list
+    final sortedInstallments = List<PlayerInstallmentSummary>.from(widget.installments);
+
+    // 2. APPLY MAGIC SORTING (Overdue First, Latest Paid First)
+    sortedInstallments.sort((a, b) {
+      // Step A: Status Check
+      bool isPaidA = (a.status ?? '').toUpperCase() == 'PAID';
+      bool isPaidB = (b.status ?? '').toUpperCase() == 'PAID';
+
+      // Rule 1: Jar status vegla asel, tar UNPAID varati (-1), PAID khali (1)
+      if (isPaidA != isPaidB) {
+        return isPaidA ? 1 : -1;
+      }
+
+      // Step B: Date Sorting based on Status
+      DateTime dateA = a.dueDate ?? DateTime(2099);
+      DateTime dateB = b.dueDate ?? DateTime(2099);
+
+      if (isPaidA) {
+        // Rule 2: Jar PAID asel -> LATEST FIRST (May adhi, Jan nantar)
+        return dateB.compareTo(dateA);
+      } else {
+        // Rule 3: Jar UNPAID asel -> OLDEST FIRST (Nov adhi, Dec nantar - Urgent)
+        return dateA.compareTo(dateB);
+      }
+    });
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -97,11 +121,33 @@ class _PlayerSummaryCardState extends State<PlayerSummaryCard> {
               const SizedBox(height: 12),
 
               // --- CHIPS ---
+              // --- MONTH PILLS ---
               if (sortedInstallments.isNotEmpty) ...[
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
-                  children: sortedInstallments.map((inst) => _buildMonthChip(context, inst)).toList(),
+                  children: [
+                    // 1. फक्त पहिले 6 महिने दाखवा (Display only first 6 items)
+                    ...sortedInstallments.take(6).map((inst) => _buildMonthChip(context, inst)),
+
+                    // 2. जर 6 पेक्षा जास्त असतील, तर '+ N more' दाखवा
+                    if (sortedInstallments.length > 6)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade200,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          "+${sortedInstallments.length - 6} more",
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.grey.shade700
+                          ),
+                        ),
+                      )
+                  ],
                 ),
                 const SizedBox(height: 16),
               ],
