@@ -23,75 +23,44 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
 
   List<Group> _groups = [];
   int? _selectedGroupId;
-  DateTime? _joinDate;
+  DateTime? _joinDate = DateTime.now();
   DateTime? _installmentDueDate;
   bool _isLoading = false;
-  bool _loadingGroups = true;
   Map<String, double> _fees = {};
+
+  // ✅ Payment Cycle (Default 1 Month)
+  int _paymentCycleMonths = 1;
 
   @override
   void initState() {
     super.initState();
     _loadGroupsAndFees();
+    // Default First Installment Date = Next Month (Monthly Logic)
+    _installmentDueDate = DateTime.now().add(const Duration(days: 30));
   }
 
   Future<void> _loadGroupsAndFees() async {
-    setState(() => _loadingGroups = true);
-    final box = Hive.box('app_cache');
-
-    try {
-      final rawFees = box.get('fee_structures', defaultValue: <dynamic, dynamic>{});
-      if (rawFees is Map) {
-        _fees = rawFees.map((k, v) => MapEntry(k.toString(), (v as num).toDouble()));
-      }
-
-      final cachedGroups = box.get('groups_list', defaultValue: []);
-      if (cachedGroups is List && cachedGroups.isNotEmpty) {
-        final parsed = cachedGroups.map((json) {
-          try {
-            if (json is Map<String, dynamic>) return Group.fromJson(json);
-            if (json is Map) return Group.fromJson(Map<String, dynamic>.from(json));
-            return null;
-          } catch (_) { return null; }
-        }).whereType<Group>().toList();
-
-        if (parsed.isNotEmpty) {
-          if (mounted) setState(() { _groups = parsed; _validateSelection(); _loadingGroups = false; });
-        }
-      }
-    } catch (e) { debugPrint('Cache load error: $e'); }
-
     try {
       final apiGroups = await ApiService.fetchGroups();
-      if (apiGroups.isNotEmpty) {
-        try {
-          final groupsJson = apiGroups.map((g) => g.toJson()).toList();
-          await box.put('groups_list', groupsJson);
-        } catch (e) { debugPrint('Hive save error: $e'); }
-
-        if (mounted) setState(() { _groups = apiGroups; _validateSelection(); _loadingGroups = false; });
+      if (mounted) {
+        setState(() {
+          _groups = apiGroups;
+          if (_groups.isNotEmpty) _selectedGroupId = _groups.first.id;
+        });
       }
     } catch (e) {
-      debugPrint('API Error: $e');
-      if (mounted && _groups.isEmpty) setState(() => _loadingGroups = false);
-    }
-  }
-
-  void _validateSelection() {
-    if (_groups.isEmpty) { _selectedGroupId = null; return; }
-    if (_selectedGroupId == null || !_groups.any((g) => g.id == _selectedGroupId)) {
-      _selectedGroupId = _groups.first.id;
+      debugPrint('Error loading groups: $e');
     }
   }
 
   Future<void> _pickDate(bool isJoin) async {
     final now = DateTime.now();
-    final initial = isJoin ? (_joinDate ?? now) : (_installmentDueDate ?? (_joinDate ?? now));
+    final initial = isJoin ? (_joinDate ?? now) : (_installmentDueDate ?? now);
 
     final picked = await showDatePicker(
       context: context,
       initialDate: initial,
-      firstDate: DateTime(1990),
+      firstDate: DateTime(2020),
       lastDate: DateTime(now.year + 5),
       builder: (ctx, child) => Theme(
         data: ThemeData.dark().copyWith(
@@ -108,30 +77,29 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
 
     if (picked != null) {
       setState(() {
-        if (isJoin) _joinDate = picked; else _installmentDueDate = picked;
+        if (isJoin) {
+          _joinDate = picked;
+          // Optional: Join Date बदलली तर Installment Date पण अपडेट करा
+          _installmentDueDate = DateTime(picked.year, picked.month + _paymentCycleMonths, picked.day);
+        } else {
+          _installmentDueDate = picked;
+        }
       });
     }
   }
 
-  double? _selectedGroupFee() {
-    if (_selectedGroupId == null) return null;
-    try {
-      final g = _groups.firstWhere((e) => e.id == _selectedGroupId);
-      return _fees[g.name];
-    } catch (_) { return null; }
-  }
-
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    if (_selectedGroupId == null || _joinDate == null || _installmentDueDate == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please fill all fields')));
+    if (_selectedGroupId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please select a group')));
       return;
     }
 
     setState(() => _isLoading = true);
 
     try {
-      final createdPlayer = await ApiService.createPlayer(
+      // ✅ Create Player (Backend will auto-create installment)
+      await ApiService.createPlayer(
         name: _nameCtl.text.trim(),
         phone: _phoneCtl.text.trim(),
         age: _ageCtl.text.isEmpty ? null : int.tryParse(_ageCtl.text.trim()),
@@ -139,21 +107,16 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
         groupId: _selectedGroupId!,
         notes: _notesCtl.text.isEmpty ? null : _notesCtl.text.trim(),
         photoUrl: _photoCtl.text.isEmpty ? null : _photoCtl.text.trim(),
-      );
 
-      await ApiService.createInstallment(
-        playerId: createdPlayer.id,
-        periodMonth: _installmentDueDate!.month,
-        periodYear: _installmentDueDate!.year,
-        dueDate: _installmentDueDate!,
-        amount: _selectedGroupFee(),
+        // ✨ Passing New Fields
+        firstInstallmentDate: _installmentDueDate,
+        paymentCycleMonths: _paymentCycleMonths,
       );
 
       EventBus().fire(PlayerEvent('added'));
-      EventBus().fire(PlayerEvent('installment_created'));
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Player Created Successfully'), backgroundColor: Colors.green));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Player Added! First Bill Generated.'), backgroundColor: Colors.green));
       Navigator.of(context).pop(true);
     } catch (e) {
       if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.redAccent));
@@ -165,7 +128,6 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
   @override
   Widget build(BuildContext context) {
     final df = DateFormat('dd MMM yyyy');
-    final selectedFee = _selectedGroupFee();
 
     return Scaffold(
       extendBodyBehindAppBar: true,
@@ -177,9 +139,7 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
       ),
       body: Stack(
         children: [
-          // Background
           Container(decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF0F2027), Color(0xFF203A43), Color(0xFF2C5364)]))),
-          Positioned(top: -50, right: -50, child: Container(height: 250, width: 250, decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.cyan.withOpacity(0.15), boxShadow: [BoxShadow(color: Colors.cyan.withOpacity(0.2), blurRadius: 100)]))),
 
           SafeArea(
             child: _isLoading
@@ -196,6 +156,7 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
                     child: Form(
                       key: _formKey,
                       child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           _neonTextField(_nameCtl, 'Full Name', Icons.person),
                           const SizedBox(height: 16),
@@ -223,24 +184,54 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
                             items: _groups.map((g) => DropdownMenuItem(value: g.id, child: Text(g.name))).toList(),
                             onChanged: (v) => setState(() => _selectedGroupId = v),
                           ),
-                          if (selectedFee != null)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 8, left: 10),
-                              child: Align(alignment: Alignment.centerLeft, child: Text('Monthly Fee: ₹${selectedFee.toStringAsFixed(0)}', style: const TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold))),
-                            ),
+                          const SizedBox(height: 16),
+
+                          // ✅ NEW: Payment Cycle Dropdown with Auto-Date Logic
+                          DropdownButtonFormField<int>(
+                            value: _paymentCycleMonths,
+                            dropdownColor: const Color(0xFF2C5364),
+                            style: const TextStyle(color: Colors.white),
+                            decoration: _inputDeco('Payment Cycle', Icons.loop),
+                            items: const [
+                              DropdownMenuItem(value: 1, child: Text("Monthly (Every Month)")),
+                              DropdownMenuItem(value: 3, child: Text("Quarterly (Every 3 Months)")),
+                            ],
+                            onChanged: (val) {
+                              if (val != null) {
+                                setState(() {
+                                  _paymentCycleMonths = val;
+
+                                  // 🔥 MAGIC LOGIC: Automatically set next date
+                                  // Join Date (किंवा आज) + Selected Months
+                                  DateTime baseDate = _joinDate ?? DateTime.now();
+
+                                  _installmentDueDate = DateTime(
+                                      baseDate.year,
+                                      baseDate.month + val, // 1 महिना किंवा 3 महिने ऍड करा
+                                      baseDate.day
+                                  );
+                                });
+                              }
+                            },
+                          ),
 
                           const SizedBox(height: 16),
+                          const Text(" Billing Start Date (Fixes the Cycle)", style: TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 5),
                           _neonSelector(
-                              label: _installmentDueDate == null ? 'First Installment Due Date' : df.format(_installmentDueDate!),
+                              label: _installmentDueDate == null ? 'Select Date' : df.format(_installmentDueDate!),
                               icon: Icons.event_available,
                               onTap: () => _pickDate(false),
                               isHighlight: true
                           ),
+                          const SizedBox(height: 8),
+                          Text(
+                            "Note: This date determines the billing day for all future payments.",
+                            style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12),
+                          ),
 
                           const SizedBox(height: 16),
                           _neonTextField(_notesCtl, 'Notes (Optional)', Icons.note, maxLines: 2),
-                          const SizedBox(height: 16),
-                          _neonTextField(_photoCtl, 'Photo URL (Optional)', Icons.image),
                           const SizedBox(height: 30),
 
                           Container(
@@ -265,6 +256,7 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
     );
   }
 
+  // Helper widgets
   Widget _neonTextField(TextEditingController ctl, String label, IconData icon, {TextInputType type = TextInputType.text, int maxLines = 1}) {
     return TextFormField(
       controller: ctl,

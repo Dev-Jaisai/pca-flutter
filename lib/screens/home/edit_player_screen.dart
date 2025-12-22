@@ -21,6 +21,11 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
   late TextEditingController _notesCtl;
   DateTime? _joinDate;
   int? _selectedGroupId;
+
+  // ✅ NEW FIELDS
+  int _paymentCycleMonths = 1;
+  DateTime? _newBillingDate; // To update billing day
+
   List<Group> _groups = [];
   bool _loading = false;
 
@@ -33,6 +38,10 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
     _notesCtl = TextEditingController(text: widget.player.notes);
     _joinDate = widget.player.joinDate;
     _selectedGroupId = widget.player.groupId;
+
+    // Initialize Cycle from existing player data
+    _paymentCycleMonths = widget.player.paymentCycleMonths ?? 1;
+
     _fetchGroups();
   }
 
@@ -54,8 +63,16 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
         "groupId": _selectedGroupId,
         "joinDate": _joinDate?.toIso8601String().split('T')[0],
         "notes": _notesCtl.text.trim(),
+
+        // ✅ SEND UPDATED BILLING INFO
+        "paymentCycleMonths": _paymentCycleMonths,
+        // Only send date if user picked a new one to change the billing day
+        if (_newBillingDate != null)
+          "firstInstallmentDate": _newBillingDate?.toIso8601String().split('T')[0],
       };
+
       await ApiService.updatePlayer(widget.player.id, data);
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Updated successfully'), backgroundColor: Colors.green));
         Navigator.pop(context, true);
@@ -67,12 +84,15 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
     }
   }
 
-  Future<void> _pickDate() async {
+  Future<void> _pickDate(bool isJoin) async {
+    final now = DateTime.now();
+    final initial = isJoin ? (_joinDate ?? now) : (_newBillingDate ?? now);
+
     final picked = await showDatePicker(
       context: context,
-      initialDate: _joinDate ?? DateTime.now(),
+      initialDate: initial,
       firstDate: DateTime(2000),
-      lastDate: DateTime.now(),
+      lastDate: DateTime(now.year + 5), // Allow future dates for billing
       builder: (ctx, child) => Theme(
         data: ThemeData.dark().copyWith(
           colorScheme: const ColorScheme.dark(primary: Colors.cyanAccent, onPrimary: Colors.black, surface: Color(0xFF203A43)),
@@ -80,11 +100,27 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
         child: child!,
       ),
     );
-    if (picked != null) setState(() => _joinDate = picked);
+
+    if (picked != null) {
+      setState(() {
+        if (isJoin) {
+          _joinDate = picked;
+        } else {
+          _newBillingDate = picked;
+        }
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final df = DateFormat('dd MMM yyyy');
+
+    // Display string for current billing day
+    String currentBillDayStr = widget.player.billingDay != null
+        ? "Current Billing Day: ${widget.player.billingDay}"
+        : "Current Billing Day: Not Set";
+
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(title: const Text('Edit Player', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)), backgroundColor: Colors.transparent, elevation: 0, iconTheme: const IconThemeData(color: Colors.white)),
@@ -106,6 +142,7 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
                     child: Form(
                       key: _formKey,
                       child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           _neonTextField(_nameCtl, 'Full Name', Icons.person),
                           const SizedBox(height: 16),
@@ -121,14 +158,68 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
                           ),
                           const SizedBox(height: 16),
                           GestureDetector(
-                            onTap: _pickDate,
+                            onTap: () => _pickDate(true), // Join Date
                             child: AbsorbPointer(child: _neonTextField(TextEditingController(text: _joinDate == null ? '' : DateFormat('yyyy-MM-dd').format(_joinDate!)), 'Join Date', Icons.calendar_today)),
                           ),
                           const SizedBox(height: 16),
                           _neonTextField(_ageCtl, 'Age', Icons.cake, type: TextInputType.number),
+
+                          // --- ✅ BILLING SECTION ---
+                          const SizedBox(height: 25),
+                          const Divider(color: Colors.white24),
+                          const Text("Billing Settings", style: TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 15),
+
+                          // 1. Payment Cycle Dropdown
+                          DropdownButtonFormField<int>(
+                            value: _paymentCycleMonths,
+                            dropdownColor: const Color(0xFF2C5364),
+                            style: const TextStyle(color: Colors.white),
+                            decoration: _inputDeco('Payment Cycle', Icons.loop),
+                            items: const [
+                              DropdownMenuItem(value: 1, child: Text("Monthly (Every Month)")),
+                              DropdownMenuItem(value: 3, child: Text("Quarterly (Every 3 Months)")),
+                            ],
+                            onChanged: (v) => setState(() => _paymentCycleMonths = v!),
+                          ),
+                          const SizedBox(height: 16),
+
+                          // 2. Billing Day Picker
+                          Text(currentBillDayStr, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                          const SizedBox(height: 5),
+                          GestureDetector(
+                            onTap: () => _pickDate(false), // Billing Date
+                            child: Container(
+                              height: 60,
+                              padding: const EdgeInsets.symmetric(horizontal: 12),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.3),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: _newBillingDate != null ? Colors.cyanAccent : Colors.white.withOpacity(0.1)),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.event_repeat, color: Colors.cyanAccent.withOpacity(0.7)),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      _newBillingDate == null ? 'Tap to change Billing Day' : 'New Start Date: ${df.format(_newBillingDate!)}',
+                                      style: const TextStyle(color: Colors.white),
+                                    ),
+                                  ),
+                                  if (_newBillingDate != null)
+                                    const Icon(Icons.check_circle, color: Colors.greenAccent, size: 20)
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 25),
+                          const Divider(color: Colors.white24),
+
                           const SizedBox(height: 16),
                           _neonTextField(_notesCtl, 'Notes', Icons.note, maxLines: 2),
                           const SizedBox(height: 30),
+
                           Container(
                             width: double.infinity,
                             decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), gradient: const LinearGradient(colors: [Colors.purple, Colors.deepPurpleAccent])),

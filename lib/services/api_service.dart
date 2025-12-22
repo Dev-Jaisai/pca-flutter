@@ -14,11 +14,10 @@ import '../models/player_installment_summary.dart';
 
 class ApiService {
   // Use 10.0.2.2 for Android emulator, localhost for iOS simulator, or PC LAN IP for real devices.
-  // static const String baseUrl =
-  //     'http://pca-backend-env.eba-mzebaydc.ap-south-1.elasticbeanstalk.com';
+
 
   static const String baseUrl = 'http://10.0.2.2:5000';
-
+  // static const String baseUrl = 'https://pca-backend-1.onrender.com';
   // ---------------- Players ----------------
   static Future<List<Player>> fetchPlayers() async {
     final url = Uri.parse('$baseUrl/api/players');
@@ -33,7 +32,7 @@ class ApiService {
           'Failed to load players: ${response.statusCode} - ${response.body}');
     }
   }
-
+// ✅ UPDATED createPlayer
   static Future<Player> createPlayer({
     required String name,
     required String phone,
@@ -42,6 +41,10 @@ class ApiService {
     required int groupId,
     String? notes,
     String? photoUrl,
+
+    // New Parameters
+    DateTime? firstInstallmentDate,
+    int? paymentCycleMonths, // 1 or 3
   }) async {
     final url = Uri.parse('$baseUrl/api/players');
     final body = {
@@ -53,6 +56,12 @@ class ApiService {
       'groupId': groupId,
       if (notes != null) 'notes': notes,
       if (photoUrl != null) 'photoUrl': photoUrl,
+
+      // Pass to Backend
+      if (firstInstallmentDate != null)
+        'firstInstallmentDate': firstInstallmentDate.toIso8601String().split('T')[0],
+      if (paymentCycleMonths != null)
+        'paymentCycleMonths': paymentCycleMonths,
     };
 
     final response = await http.post(
@@ -68,7 +77,6 @@ class ApiService {
           'Failed to create player: ${response.statusCode} - ${response.body}');
     }
   }
-
   static Future<void> deletePlayer(int id) async {
     final url = Uri.parse('$baseUrl/api/players/$id');
     final response = await http.delete(url);
@@ -78,6 +86,26 @@ class ApiService {
     }
   }
 
+
+  // ✅ NEW: Bulk Extend for Holidays (+ Days logic)
+  static Future<void> bulkExtendDays({
+    required int month,
+    required int year,
+    required int days,
+  }) async {
+    // Note: Ensure your backend Controller has this endpoint mapped as:
+    // @PostMapping("/bulk-extend-days")
+    final url = Uri.parse('$baseUrl/api/installments/bulk-extend-days?month=$month&year=$year&days=$days');
+
+    final response = await http.post(
+      url,
+      headers: {'Content-Type': 'application/json'},
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to extend dates: ${response.body}');
+    }
+  }
   // ---------------- Groups ----------------
   static Future<List<Group>> fetchGroups() async {
     final url = Uri.parse('$baseUrl/api/groups');

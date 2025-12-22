@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-import 'package:textewidget/screens/installments/OverduePlayersScreen.dart';
-import 'package:textewidget/screens/installments/all_installments_screen.dart';
 
 // --- Screen Imports ---
 import 'screens/splash/splash_screen.dart';
@@ -15,8 +13,9 @@ import 'screens/payments/payment_list_screen.dart';
 import 'screens/installments/installment_summary_screen.dart';
 import 'screens/installments/all_installments_screen.dart';
 import 'screens/installments/all_players_installments_screen.dart';
+import 'screens/installments/OverduePlayersScreen.dart'; // Check file case sensitivity
 import 'screens/reminders/sms_reminder_screen.dart';
-import 'screens/landing/landing_screen.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Hive.initFlutter();
@@ -32,20 +31,33 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'PCA Academy',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+
+      // 🔥 FIX: White Flash घालवण्यासाठी Dark Theme सेट केली आहे
+      theme: ThemeData.dark().copyWith(
+        // हा कलर तुमच्या Gradient च्या पहिल्या कलरशी मॅच होतो
+        scaffoldBackgroundColor: const Color(0xFF0F2027),
+
+        primaryColor: Colors.cyanAccent,
         useMaterial3: true,
+
+        // Color Scheme पण Dark ठेवा
+        colorScheme: const ColorScheme.dark(
+          primary: Colors.cyanAccent,
+          onPrimary: Colors.black,
+          surface: Color(0xFF203A43), // Cards/Dialogs साठी
+        ),
       ),
-      // Start with the Intro Screen
+
+      // Start with the Splash Screen
       initialRoute: '/',
 
       routes: {
         '/': (ctx) => const SplashScreen(),
 
-        // This is your Intro Screen
+        // Intro Screen
         '/intro': (ctx) => const IntroLandingScreen(),
 
-        // This is your Main Dashboard (LandingScreen)
+        // Main Dashboard
         '/dashboard': (ctx) => const LandingScreen(),
 
         // Other routes

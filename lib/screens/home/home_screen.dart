@@ -5,6 +5,7 @@ import '../../models/player.dart';
 import '../../services/api_service.dart';
 import '../../services/data_manager.dart';
 import '../../services/player_shimmer_list.dart';
+import '../installments/BulkExtendScreen.dart';
 import '../installments/installments_screen.dart';
 import 'add_player_screen.dart';
 import 'edit_player_screen.dart';
@@ -109,8 +110,21 @@ class _HomeScreenState extends State<HomeScreen> {
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
         actions: [
+          // IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh, color: Colors.white)),
+          IconButton(
+            icon: const Icon(Icons.holiday_village, color: Colors.orangeAccent),
+            tooltip: "Holiday / Bulk Extend",
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const BulkExtendScreen()),
+              ).then((_) => _refresh()); // Refresh after returning
+            },
+          ),
+
           IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh, color: Colors.white)),
         ],
+
       ),
       body: Stack(
         children: [
