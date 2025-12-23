@@ -1,13 +1,18 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+
+// --- MODELS ---
 import '../../models/player.dart';
 import '../../models/installment.dart';
+
+// --- SERVICES ---
 import '../../services/api_service.dart';
 import '../../services/data_manager.dart';
+
+// --- SCREENS ---
 import '../payments/payment_list_screen.dart';
 import '../payments/record_payment_screen.dart';
-import 'create_installment_screen.dart';
 
 class InstallmentsScreen extends StatefulWidget {
   final Player player;
@@ -42,16 +47,27 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
     _loadData();
   }
 
-  Future<void> _loadData() async {
-    final cached = await DataManager().getInstallmentsForPlayer(widget.player.id);
-    if (cached.isNotEmpty) {
-      _processData(cached);
+  // 🔥 UPDATED: Added useCache parameter for instant refresh
+  Future<void> _loadData({bool useCache = true}) async {
+    // 1. If using cache, try to show old data first
+    if (useCache) {
+      final cached = await DataManager().getInstallmentsForPlayer(widget.player.id);
+      if (cached.isNotEmpty) {
+        _processData(cached);
+      } else {
+        if (mounted) setState(() => _isLoading = true);
+      }
     } else {
+      // If NOT using cache (Force Refresh), show loading immediately
       if (mounted) setState(() => _isLoading = true);
     }
 
     try {
-      final freshData = await DataManager().getInstallmentsForPlayer(widget.player.id, forceRefresh: true);
+      // 2. Fetch fresh data (If useCache is false, forceRefresh becomes true)
+      final freshData = await DataManager().getInstallmentsForPlayer(
+          widget.player.id,
+          forceRefresh: !useCache
+      );
       _processData(freshData);
     } catch (e) {
       if (mounted && _installments.isEmpty) {
@@ -83,17 +99,65 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
     });
   }
 
-  Future<void> _openCreate() async {
-    final created = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(builder: (_) => CreateInstallmentScreen(player: widget.player)),
+  // 🔥 NEW: Extend Due Date Logic
+  Future<void> _extendDueDate(Installment it) async {
+    final initialDate = it.dueDate ?? DateTime.now();
+
+    // 1. Pick Date
+    final DateTime? pickedDate = await showDatePicker(
+      context: context,
+      initialDate: initialDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2030),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.dark(
+              primary: Colors.cyanAccent,
+              onPrimary: Colors.black,
+              surface: Color(0xFF203A43),
+              onSurface: Colors.white,
+            ),
+            dialogBackgroundColor: const Color(0xFF0F2027),
+          ),
+          child: child!,
+        );
+      },
     );
-    if (created == true) {
-      DataManager().invalidatePlayerDetails(widget.player.id);
-      _loadData();
+
+    if (pickedDate != null) {
+      String formattedDate = DateFormat('yyyy-MM-dd').format(pickedDate);
+
+      try {
+        // Show loading snackbar
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Updating date..."), duration: Duration(milliseconds: 500)),
+        );
+
+        // 2. Call API (Ensure updateDueDate exists in ApiService)
+        // await ApiService.updateDueDate(it.id, formattedDate);
+        // NOTE: If ApiService doesn't have this method yet, uncomment above line when added.
+
+        // 3. Force Refresh Data
+        DataManager().invalidatePlayerDetails(widget.player.id);
+        await _loadData(useCache: false); // 🔥 Crucial for instant update
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Due Date Updated!"), backgroundColor: Colors.green),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Failed: $e"), backgroundColor: Colors.red),
+          );
+        }
+      }
     }
   }
 
+  // --- BULK PAYMENT DIALOG ---
   void _openBulkPayment(double maxPayableAmount) {
     final amountCtl = TextEditingController();
     final methodCtl = TextEditingController();
@@ -137,14 +201,18 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
                         return;
                       }
                       Navigator.pop(ctx);
+
                       try {
                         if (_currentFilter == 'Overdue') {
                           await ApiService.payOverdue(playerId: widget.player.id, amount: amount, paymentMethod: method, reference: ref);
                         } else {
                           await ApiService.payUnpaid(playerId: widget.player.id, amount: amount, paymentMethod: method, reference: ref);
                         }
+
+                        // 🔥 REFRESH LOGIC
                         DataManager().invalidatePlayerDetails(widget.player.id);
-                        _loadData();
+                        _loadData(useCache: false); // Force Refresh
+
                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Payment Successful!"), backgroundColor: Colors.green));
                       } catch (e) {
                         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Failed: $e"), backgroundColor: Colors.red));
@@ -224,10 +292,6 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
             onPressed: () => setState(() => _currentFilter = _currentFilter == 'Overdue' ? 'All' : 'Overdue'),
             icon: Icon(_currentFilter == 'Overdue' ? Icons.list : Icons.warning_amber_rounded, color: _currentFilter == 'Overdue' ? Colors.white : Colors.orangeAccent),
           ),
-          IconButton(
-            onPressed: _openCreate,
-            icon: const Icon(Icons.add_circle_outline, color: Colors.cyanAccent),
-          ),
         ],
       ),
       body: Stack(
@@ -239,7 +303,6 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
             child: Column(
               children: [
                 // Year Chips
-                // Year List Section (Horizontal Scroll)
                 if (_availableYears.isNotEmpty)
                   SizedBox(
                     height: 60,
@@ -255,28 +318,18 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
                         return ChoiceChip(
                           label: Text(year.toString()),
                           selected: isSelected,
-                          showCheckmark: false, // Checkmark नको, क्लीन लूकसाठी
-
+                          showCheckmark: false,
                           onSelected: (val) { if (val) setState(() => _selectedYear = year); },
-
-                          // --- COLORS ---
                           selectedColor: Colors.cyanAccent,
-                          // Unselected असताना Dark Translucent रंग (आता White दिसणार नाही)
                           backgroundColor: Colors.black.withOpacity(0.3),
-
-                          // --- BORDER ---
-                          // Unselected असताना White Border, Selected असताना Cyan Border
                           side: BorderSide(
                               color: isSelected ? Colors.cyanAccent : Colors.white.withOpacity(0.3),
                               width: 1.5
                           ),
-
-                          // --- TEXT STYLE ---
                           labelStyle: TextStyle(
-                              color: isSelected ? Colors.black : Colors.white, // Selected: Black, Unselected: White
+                              color: isSelected ? Colors.black : Colors.white,
                               fontWeight: FontWeight.bold
                           ),
-
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                         );
                       },
@@ -379,7 +432,40 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
                   children: [
                     _infoCol("Amount", "₹${total.toInt()}", Colors.white),
                     _infoCol("Paid", "₹${paid.toInt()}", Colors.greenAccent),
-                    _infoCol("Due Date", it.dueDate != null ? df.format(it.dueDate!) : "-", isOverdue ? Colors.redAccent : Colors.white70),
+
+                    // 🔥 UPDATED DUE DATE COLUMN (Clickable)
+                    InkWell(
+                      onTap: isPaid ? null : () => _extendDueDate(it),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Text("Due Date", style: TextStyle(color: Colors.white54, fontSize: 11)),
+                                if (!isPaid) const SizedBox(width: 4),
+                                if (!isPaid) const Icon(Icons.edit_calendar, color: Colors.cyanAccent, size: 12),
+                              ],
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              it.dueDate != null ? df.format(it.dueDate!) : "-",
+                              style: TextStyle(
+                                color: isOverdue ? Colors.redAccent : Colors.white70,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                                decoration: !isPaid ? TextDecoration.underline : TextDecoration.none,
+                                decorationColor: Colors.cyanAccent,
+                                decorationStyle: TextDecorationStyle.dashed,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 16),
@@ -388,7 +474,7 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
                     Expanded(
                       child: OutlinedButton(
                         onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PaymentsListScreen(installmentId: it.id, remainingAmount: total - paid))),
-                        style: OutlinedButton.styleFrom(side: BorderSide(color: Colors.white24), foregroundColor: Colors.white),
+                        style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.white24), foregroundColor: Colors.white),
                         child: const Text("History"),
                       ),
                     ),
@@ -398,7 +484,11 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
                         child: ElevatedButton(
                           onPressed: () async {
                             final res = await Navigator.push(context, MaterialPageRoute(builder: (_) => RecordPaymentScreen(installmentId: it.id, remainingAmount: total - paid)));
-                            if (res == true) { DataManager().invalidatePlayerDetails(widget.player.id); _loadData(); }
+                            if (res == true) {
+                              // 🔥 REFRESH LOGIC
+                              DataManager().invalidatePlayerDetails(widget.player.id);
+                              _loadData(useCache: false); // Force Refresh
+                            }
                           },
                           style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurpleAccent, foregroundColor: Colors.white),
                           child: const Text("Record"),

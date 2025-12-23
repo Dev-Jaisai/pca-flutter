@@ -22,9 +22,8 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
   DateTime? _joinDate;
   int? _selectedGroupId;
 
-  // ✅ NEW FIELDS
   int _paymentCycleMonths = 1;
-  DateTime? _newBillingDate; // To update billing day
+  DateTime? _newBillingDate;
 
   List<Group> _groups = [];
   bool _loading = false;
@@ -64,9 +63,8 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
         "joinDate": _joinDate?.toIso8601String().split('T')[0],
         "notes": _notesCtl.text.trim(),
 
-        // ✅ SEND UPDATED BILLING INFO
+        // Send Updated Billing Info
         "paymentCycleMonths": _paymentCycleMonths,
-        // Only send date if user picked a new one to change the billing day
         if (_newBillingDate != null)
           "firstInstallmentDate": _newBillingDate?.toIso8601String().split('T')[0],
       };
@@ -92,7 +90,7 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
       context: context,
       initialDate: initial,
       firstDate: DateTime(2000),
-      lastDate: DateTime(now.year + 5), // Allow future dates for billing
+      lastDate: DateTime(now.year + 5),
       builder: (ctx, child) => Theme(
         data: ThemeData.dark().copyWith(
           colorScheme: const ColorScheme.dark(primary: Colors.cyanAccent, onPrimary: Colors.black, surface: Color(0xFF203A43)),
@@ -116,10 +114,14 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
   Widget build(BuildContext context) {
     final df = DateFormat('dd MMM yyyy');
 
-    // Display string for current billing day
+    // Display strings
     String currentBillDayStr = widget.player.billingDay != null
-        ? "Current Billing Day: ${widget.player.billingDay}"
-        : "Current Billing Day: Not Set";
+        ? "${widget.player.billingDay}"
+        : "Not Set";
+
+    String currentCycleStr = (widget.player.paymentCycleMonths ?? 1) == 3
+        ? "Quarterly (3 Months)"
+        : "Monthly (1 Month)";
 
     return Scaffold(
       extendBodyBehindAppBar: true,
@@ -164,18 +166,45 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
                           const SizedBox(height: 16),
                           _neonTextField(_ageCtl, 'Age', Icons.cake, type: TextInputType.number),
 
-                          // --- ✅ BILLING SECTION ---
-                          const SizedBox(height: 25),
+                          // --- ✅ IMPROVED BILLING SECTION ---
+                          const SizedBox(height: 30),
                           const Divider(color: Colors.white24),
-                          const Text("Billing Settings", style: TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold)),
+                          const Text("Billing Settings", style: TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold, fontSize: 16)),
                           const SizedBox(height: 15),
 
-                          // 1. Payment Cycle Dropdown
+                          // 🔥 INFO CARD (Current Status)
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.blueAccent.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.blueAccent.withOpacity(0.3)),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.info_outline, color: Colors.lightBlueAccent),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text("Current Cycle: $currentCycleStr", style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                                      const SizedBox(height: 4),
+                                      Text("Billing Day: $currentBillDayStr", style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+
+                          // 1. Payment Cycle Dropdown (Edit)
                           DropdownButtonFormField<int>(
                             value: _paymentCycleMonths,
                             dropdownColor: const Color(0xFF2C5364),
                             style: const TextStyle(color: Colors.white),
-                            decoration: _inputDeco('Payment Cycle', Icons.loop),
+                            decoration: _inputDeco('Update Cycle', Icons.loop),
                             items: const [
                               DropdownMenuItem(value: 1, child: Text("Monthly (Every Month)")),
                               DropdownMenuItem(value: 3, child: Text("Quarterly (Every 3 Months)")),
@@ -184,9 +213,7 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
                           ),
                           const SizedBox(height: 16),
 
-                          // 2. Billing Day Picker
-                          Text(currentBillDayStr, style: const TextStyle(color: Colors.white54, fontSize: 12)),
-                          const SizedBox(height: 5),
+                          // 2. Billing Day Picker (Edit)
                           GestureDetector(
                             onTap: () => _pickDate(false), // Billing Date
                             child: Container(
@@ -203,8 +230,8 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
                                   const SizedBox(width: 12),
                                   Expanded(
                                     child: Text(
-                                      _newBillingDate == null ? 'Tap to change Billing Day' : 'New Start Date: ${df.format(_newBillingDate!)}',
-                                      style: const TextStyle(color: Colors.white),
+                                      _newBillingDate == null ? 'Update Billing Day' : 'New Start Date: ${df.format(_newBillingDate!)}',
+                                      style: TextStyle(color: _newBillingDate == null ? Colors.white60 : Colors.white),
                                     ),
                                   ),
                                   if (_newBillingDate != null)
@@ -213,6 +240,8 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
                               ),
                             ),
                           ),
+                          // --- END BILLING SECTION ---
+
                           const SizedBox(height: 25),
                           const Divider(color: Colors.white24),
 

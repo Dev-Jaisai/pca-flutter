@@ -11,6 +11,9 @@ import 'add_player_screen.dart';
 import 'edit_player_screen.dart';
 import '../../utils/event_bus.dart';
 
+// ✅ IMPORT THIS
+import '../installments/create_installment_screen.dart';
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
   @override
@@ -27,7 +30,7 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _initialLoad();
     EventBus().stream.listen((event) {
-      if (['added', 'deleted', 'updated'].contains(event.action)) {
+      if (['added', 'deleted', 'updated', 'installment_created'].contains(event.action)) {
         _fetchFromApi();
       }
     });
@@ -110,7 +113,6 @@ class _HomeScreenState extends State<HomeScreen> {
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
         actions: [
-          // IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh, color: Colors.white)),
           IconButton(
             icon: const Icon(Icons.holiday_village, color: Colors.orangeAccent),
             tooltip: "Holiday / Bulk Extend",
@@ -118,13 +120,11 @@ class _HomeScreenState extends State<HomeScreen> {
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const BulkExtendScreen()),
-              ).then((_) => _refresh()); // Refresh after returning
+              ).then((_) => _refresh());
             },
           ),
-
           IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh, color: Colors.white)),
         ],
-
       ),
       body: Stack(
         children: [
@@ -145,7 +145,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
           // 3. CONTENT
           _showShimmer
-              ? const PlayerShimmerList() // Note: Shimmer might need updating for dark theme, but keeping for now
+              ? const PlayerShimmerList()
               : RefreshIndicator(
             onRefresh: _refresh,
             color: Colors.cyanAccent,
@@ -153,7 +153,7 @@ class _HomeScreenState extends State<HomeScreen> {
             child: _players.isEmpty
                 ? ListView(children: const [SizedBox(height: 120), Center(child: Text('No players found', style: TextStyle(color: Colors.white54)))])
                 : ListView.builder(
-              padding: const EdgeInsets.fromLTRB(16, 100, 16, 80), // Top padding for AppBar
+              padding: const EdgeInsets.fromLTRB(16, 100, 16, 80),
               itemCount: _players.length,
               itemBuilder: (context, index) {
                 final p = _players[index];
@@ -234,9 +234,24 @@ class _HomeScreenState extends State<HomeScreen> {
                           ],
                         ),
                       ),
+
+                      // --- ACTION BUTTONS ---
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          // 🔥 NEW: GENERATE BILL BUTTON
+                          IconButton(
+                            icon: const Icon(Icons.receipt_long, color: Colors.greenAccent, size: 22),
+                            tooltip: "Generate Bill",
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (_) => CreateInstallmentScreen(player: p)),
+                              ).then((_) => _fetchFromApi());
+                            },
+                          ),
+
+                          // EDIT BUTTON
                           IconButton(
                             icon: Icon(Icons.edit_outlined, color: Colors.blueAccent.shade100, size: 22),
                             onPressed: () async {
@@ -247,6 +262,8 @@ class _HomeScreenState extends State<HomeScreen> {
                               if (updated == true) _fetchFromApi();
                             },
                           ),
+
+                          // DELETE BUTTON
                           IconButton(
                             icon: Icon(Icons.delete_outline, color: Colors.redAccent.shade100, size: 22),
                             onPressed: () => _confirmDelete(p.id, p.name),
