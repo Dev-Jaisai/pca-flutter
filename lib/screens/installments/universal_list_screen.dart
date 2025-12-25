@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../models/player.dart';
 import '../../models/player_installment_summary.dart';
 import '../../services/data_manager.dart';
+import '../../utils/event_bus.dart';
 import '../../widgets/PlayerSummaryCard.dart';
 
 class UniversalListScreen extends StatefulWidget {
@@ -26,15 +28,32 @@ class _UniversalListScreenState extends State<UniversalListScreen> {
   bool _loading = true;
   List<Map<String, dynamic>> _displayList = [];
   String? _error;
+  late StreamSubscription<PlayerEvent> _eventSubscription;
 
   @override
   void initState() {
     super.initState();
     _loadData();
+    // 🔥🔥🔥 LISTEN FOR UPDATES (Auto Refresh Logic)
+    _eventSubscription = EventBus().stream.listen((event) {
+      // Jar player update jhala, kiva navin bill banla, tar list refresh kara
+      if (['updated', 'installment_created', 'payment_recorded', 'added'].contains(event.action)) {
+        debugPrint("🔄 Auto-refreshing Universal List due to event: ${event.action}");
+        _loadData();
+      }
+    });
+  }
+  @override
+  void dispose() {
+    _eventSubscription.cancel(); // 🔥 Memory Leak rokhnyasathi he garjeche ahe
+    super.dispose();
   }
   Future<void> _loadData() async {
+    if (!mounted) return;
     setState(() => _loading = true);
+
     try {
+      // 1. Fetch Data (Ekdach call kara)
       final allInstallments = await DataManager().getAllInstallments(forceRefresh: true);
       final allPlayers = await DataManager().getPlayers();
       final playerMap = {for (var p in allPlayers) p.id: p};
@@ -43,7 +62,7 @@ class _UniversalListScreenState extends State<UniversalListScreen> {
       final now = DateTime.now();
       final today = DateTime(now.year, now.month, now.day);
 
-      // Pre-process History
+      // 2. Pre-process History
       Map<int, List<PlayerInstallmentSummary>> playerHistoryMap = {};
       for (var inst in allInstallments) {
         if (inst.playerId == null) continue;
@@ -63,9 +82,7 @@ class _UniversalListScreenState extends State<UniversalListScreen> {
         bool include = false;
 
         // --- FILTER LOGIC ---
-
         if (widget.filterType == 'OVERDUE') {
-          // Overdue Logic: Date Past + Unpaid + Not Skipped
           if (dueDate.isBefore(today) &&
               status != 'PAID' &&
               status != 'SKIPPED' &&
@@ -75,16 +92,13 @@ class _UniversalListScreenState extends State<UniversalListScreen> {
           }
         }
         else if (widget.filterType == 'MONTHLY') {
-          // This Month Logic:
-          // Only show if the bill matches the month AND is NOT skipped
           if (widget.targetMonth != null) {
             final parts = widget.targetMonth!.split('-');
             if (dueDate.year == int.parse(parts[0]) &&
                 dueDate.month == int.parse(parts[1])) {
-
-              // 🔥 STRICT CHECK: If Status is SKIPPED, Do NOT Include
+              // 🔥 Strict Check: Holiday asel tar dakhavu naka
               if (status == 'SKIPPED' || status == 'CANCELLED') {
-                include = false; // Explicitly exclude
+                include = false;
               } else {
                 include = true;
               }
@@ -100,11 +114,9 @@ class _UniversalListScreenState extends State<UniversalListScreen> {
         if (include) {
           List<PlayerInstallmentSummary> history = playerHistoryMap[inst.playerId] ?? [];
 
-          // For This Month/Overdue view, filter chips to show relevant items only
+          // Clean Chips Logic
           List<PlayerInstallmentSummary> filteredChips = [];
           if (widget.filterType == 'OVERDUE' || widget.filterType == 'MONTHLY') {
-            // Show only items that are NOT Paid/Skipped (i.e., Pending/Overdue)
-            // This cleans up the UI
             filteredChips = history.where((h) {
               final s = (h.status ?? '').toUpperCase();
               return s != 'PAID' && s != 'SKIPPED' && s != 'CANCELLED';
@@ -129,7 +141,7 @@ class _UniversalListScreenState extends State<UniversalListScreen> {
       }
 
     } catch (e) {
-      print("Error: $e");
+      debugPrint("Error: $e");
       if (mounted) setState(() { _error = e.toString(); _loading = false; });
     }
   }
