@@ -23,6 +23,9 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
   String? _error;
   List<PlayerInstallmentSummary> _items = [];
 
+  // 🔥 NEW: Players Map to store extra details like Billing Day
+  Map<int, Player> _playerMap = {};
+
   // Stats Variables
   double _totalAmount = 0;
   double _totalPaid = 0;
@@ -43,21 +46,26 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
   }
 
   Future<void> _load() async {
-    final cachedData = await DataManager().getCachedAllInstallments();
-    if (cachedData != null && cachedData.isNotEmpty) {
-      if (mounted) {
-        setState(() {
-          _processAndDisplay(cachedData);
-          _loading = false;
-        });
-      }
-    } else {
-      if (mounted) setState(() => _loading = true);
-    }
+    setState(() => _loading = true);
 
     try {
+      // 🔥 1. Fetch Players First (To get Billing Day)
+      final players = await DataManager().getPlayers();
+      if (mounted) {
+        setState(() {
+          _playerMap = {for (var p in players) p.id: p};
+        });
+      }
+
+      // 2. Fetch Installments Data
+      final cachedData = await DataManager().getCachedAllInstallments();
+      if (cachedData != null && cachedData.isNotEmpty) {
+        _processAndDisplay(cachedData);
+      }
+
       final freshList = await ApiService.fetchAllInstallmentsSummary(page: 0, size: 5000);
       await DataManager().saveAllInstallments(freshList);
+
       if (mounted) {
         setState(() {
           _processAndDisplay(freshList);
@@ -66,10 +74,11 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
         });
       }
     } catch (e) {
-      if (mounted && _items.isEmpty) {
+      if (mounted) {
         setState(() {
           _loading = false;
-          _error = e.toString();
+          // Only show error if list is empty
+          if (_items.isEmpty) _error = e.toString();
         });
       }
     }
@@ -103,6 +112,7 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
     _items = filteredList;
   }
 
+  // ... (Pick Month Dialog Code Remains Same) ...
   Future<void> _pickMonth() async {
     final now = DateTime.now();
     final parts = _selectedMonth.split('-');
@@ -118,7 +128,7 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-              backgroundColor: const Color(0xFF203A43), // Dark Dialog
+              backgroundColor: const Color(0xFF203A43),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: BorderSide(color: Colors.white.withOpacity(0.1))),
               title: const Text("Select Month", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
               content: Row(
@@ -188,6 +198,7 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
     );
   }
 
+  // ... (Header Widget Code Remains Same) ...
   Widget _buildSummaryHeader() {
     final date = DateTime.parse('$_selectedMonth-01');
     final monthName = DateFormat('MMMM yyyy').format(date);
@@ -196,7 +207,7 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
       margin: const EdgeInsets.all(16),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.08), // Glass Effect
+        color: Colors.white.withOpacity(0.08),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: Colors.white.withOpacity(0.1)),
         boxShadow: [
@@ -280,11 +291,7 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [
-                  Color(0xFF0F2027),
-                  Color(0xFF203A43),
-                  Color(0xFF2C5364),
-                ],
+                colors: [Color(0xFF0F2027), Color(0xFF203A43), Color(0xFF2C5364)],
               ),
             ),
           ),
@@ -327,11 +334,20 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
                       itemCount: _items.length,
                       itemBuilder: (ctx, i) {
                         final item = _items[i];
+
+                        // 🔥 GET BILLING DAY FROM MAP
+                        int? billingDay;
+                        if (_playerMap.containsKey(item.playerId)) {
+                          billingDay = _playerMap[item.playerId]!.billingDay;
+                        }
+
                         final player = Player(
-                            id: item.playerId ?? 0,
+                            id: item.playerId,
                             name: item.playerName,
                             group: item.groupName ?? '',
-                            phone: item.phone ?? ''
+                            phone: item.phone ?? '',
+                            paymentCycleMonths: item.paymentCycleMonths,
+                            billingDay: billingDay // 🔥 PASS IT HERE
                         );
 
                         return Padding(

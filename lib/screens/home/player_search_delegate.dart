@@ -83,13 +83,54 @@ class PlayerSearchDelegate extends SearchDelegate {
             itemCount: results.length,
             itemBuilder: (context, index) {
               final player = results[index];
+
+              // 1. Player che sagale installments ghyayche
               final myInstallments = allInstallments.where((i) => i.playerId == player.id).toList();
 
+              // 2. Tyanla Sort karayche (Latest First)
+              // Manje aplalyala kalel ki sadhya chi situation kay ahe
+              myInstallments.sort((a, b) {
+                DateTime dateA = a.dueDate ?? DateTime(2000);
+                DateTime dateB = b.dueDate ?? DateTime(2000);
+                return dateB.compareTo(dateA); // Descending (Latest var)
+              });
+
               double sumTotal = 0, sumPaid = 0, sumRemaining = 0;
+              DateTime? latestPaymentDate;
+
               for (var i in myInstallments) {
                 sumTotal += (i.installmentAmount ?? 0);
                 sumPaid += i.totalPaid;
                 sumRemaining += (i.remaining ?? 0);
+
+                if (i.lastPaymentDate != null) {
+                  if (latestPaymentDate == null || i.lastPaymentDate!.isAfter(latestPaymentDate)) {
+                    latestPaymentDate = i.lastPaymentDate;
+                  }
+                }
+              }
+
+              // 🔥 KEY FIX: Logic to determine the correct STATUS
+              String displayStatus = 'PENDING';
+
+              if (myInstallments.isNotEmpty) {
+                // Latest installment cha status check kara
+                String latestRealStatus = (myInstallments.first.status ?? '').toUpperCase();
+
+                if (latestRealStatus == 'SKIPPED') {
+                  displayStatus = 'SKIPPED'; // 🏖️ Holiday Detected
+                } else if (latestRealStatus == 'CANCELLED') {
+                  displayStatus = 'CANCELLED'; // ⛔ Left Detected
+                } else {
+                  // Jar Skipped nsel, tar calculation logic vapra
+                  if (sumRemaining <= 0) {
+                    displayStatus = 'PAID';
+                  } else {
+                    displayStatus = 'PENDING';
+                  }
+                }
+              } else {
+                displayStatus = 'PAID'; // No bills = No tension
               }
 
               final aggregatedSummary = PlayerInstallmentSummary(
@@ -98,10 +139,14 @@ class PlayerSearchDelegate extends SearchDelegate {
                 totalPaid: sumPaid,
                 installmentAmount: sumTotal,
                 remaining: sumRemaining,
-                status: sumRemaining > 0 ? 'PENDING' : 'PAID',
+
+                // 🔥 Pass the CORRECT status here
+                status: displayStatus,
+
+                lastPaymentDate: latestPaymentDate,
+                dueDate: myInstallments.isNotEmpty ? myInstallments.first.dueDate : DateTime.now(),
               );
 
-              // Note: Ensure PlayerSummaryCard handles transparency/dark theme
               return Padding(
                 padding: const EdgeInsets.only(bottom: 16),
                 child: PlayerSummaryCard(

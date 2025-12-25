@@ -12,6 +12,7 @@ class PlayerConsolidatedSummary {
   final String playerName;
   final String groupName;
   final String phone;
+  final int? billingDay; // 🔥 ADDED THIS
   double totalAmount;
   double totalPaid;
   double totalRemaining;
@@ -22,6 +23,7 @@ class PlayerConsolidatedSummary {
     required this.playerName,
     required this.groupName,
     required this.phone,
+    this.billingDay, // 🔥
     this.totalAmount = 0.0,
     this.totalPaid = 0.0,
     this.totalRemaining = 0.0,
@@ -40,6 +42,7 @@ class AllInstallmentsScreen extends StatefulWidget {
 
 class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
   List<PlayerInstallmentSummary> _allItems = [];
+  Map<int, Player> _playerMap = {}; // 🔥 Store full player details here
   bool _isLoading = true;
   String? _error;
   String _currentFilter = 'All';
@@ -59,21 +62,30 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
   }
 
   Future<void> _loadAllData() async {
-    final cachedData = await DataManager().getCachedAllInstallments();
-    if (cachedData != null && cachedData.isNotEmpty) {
-      if (mounted) {
-        setState(() {
-          _allItems = cachedData;
-          _isLoading = false;
-        });
-      }
-    } else {
-      if (mounted) setState(() => _isLoading = true);
-    }
+    setState(() => _isLoading = true);
 
     try {
+      // 1. Fetch Players (to get billing day)
+      // Try cache first for players
+      var players = await DataManager().getPlayers();
+      if (players.isEmpty) {
+        players = await ApiService.fetchPlayers();
+        await DataManager().saveData(players, []);
+      }
+
+      // Create a map for fast lookup: ID -> Player
+      _playerMap = {for (var p in players) p.id: p};
+
+      // 2. Fetch Installments
+      final cachedData = await DataManager().getCachedAllInstallments();
+      if (cachedData != null && cachedData.isNotEmpty) {
+        _allItems = cachedData;
+      }
+
+      // Fetch fresh in background or foreground if empty
       final List<PlayerInstallmentSummary> list = await ApiService.fetchAllInstallmentsSummary(page: 0, size: 2000);
       await DataManager().saveAllInstallments(list);
+
       if (mounted) {
         setState(() {
           _allItems = list;
@@ -82,15 +94,17 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
         });
       }
     } catch (e) {
-      if (mounted && _allItems.isEmpty) {
+      if (mounted) {
         setState(() {
           _isLoading = false;
-          _error = e.toString();
+          // Don't show error if we have some data
+          if (_allItems.isEmpty) _error = e.toString();
         });
       }
     }
   }
 
+  // ... _pickMonthForFilter ... (Keep as is)
   Future<void> _pickMonthForFilter() async {
     final now = DateTime.now();
     final picked = await showDialog<DateTime>(
@@ -100,7 +114,7 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
         int selectedMonth = _selectedMonth.month;
         return StatefulBuilder(builder: (context, setStateDialog) {
           return AlertDialog(
-            backgroundColor: const Color(0xFF203A43), // Dark Dialog
+            backgroundColor: const Color(0xFF203A43),
             title: const Text("Select Month", style: TextStyle(color: Colors.white)),
             content: Row(
               children: [
@@ -109,14 +123,8 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
                     value: selectedMonth,
                     dropdownColor: const Color(0xFF2C5364),
                     style: const TextStyle(color: Colors.white),
-                    decoration: const InputDecoration(
-                      enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white54)),
-                    ),
-                    items: List.generate(
-                        12,
-                            (i) => DropdownMenuItem(
-                            value: i + 1,
-                            child: Text(DateFormat('MMM').format(DateTime(2024, i + 1))))),
+                    decoration: const InputDecoration(enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white54))),
+                    items: List.generate(12, (i) => DropdownMenuItem(value: i + 1, child: Text(DateFormat('MMM').format(DateTime(2024, i + 1))))),
                     onChanged: (v) => setStateDialog(() => selectedMonth = v!),
                   ),
                 ),
@@ -126,23 +134,15 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
                     value: selectedYear,
                     dropdownColor: const Color(0xFF2C5364),
                     style: const TextStyle(color: Colors.white),
-                    decoration: const InputDecoration(
-                      enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white54)),
-                    ),
-                    items: List.generate(
-                        5,
-                            (i) => DropdownMenuItem(
-                            value: now.year - 2 + i,
-                            child: Text('${now.year - 2 + i}'))),
+                    decoration: const InputDecoration(enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white54))),
+                    items: List.generate(5, (i) => DropdownMenuItem(value: now.year - 2 + i, child: Text('${now.year - 2 + i}'))),
                     onChanged: (v) => setStateDialog(() => selectedYear = v!),
                   ),
                 ),
               ],
             ),
             actions: [
-              TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text("Cancel", style: TextStyle(color: Colors.white54))),
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel", style: TextStyle(color: Colors.white54))),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.cyanAccent, foregroundColor: Colors.black),
                 onPressed: () => Navigator.pop(context, DateTime(selectedYear, selectedMonth, 1)),
@@ -158,6 +158,7 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
     }
   }
 
+  // ... _getFilteredRawItems ... (Keep as is)
   List<PlayerInstallmentSummary> _getFilteredRawItems() {
     if (_currentFilter == 'All') return _allItems;
 
@@ -192,12 +193,20 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
 
     for (var item in rawItems) {
       if (item.playerId == null) continue;
+
+      // 🔥 Retrieve billing day from Player Map
+      int? billDay;
+      if (_playerMap.containsKey(item.playerId)) {
+        billDay = _playerMap[item.playerId]!.billingDay;
+      }
+
       if (!groupedMap.containsKey(item.playerId)) {
         groupedMap[item.playerId!] = PlayerConsolidatedSummary(
           playerId: item.playerId!,
           playerName: item.playerName,
           groupName: item.groupName ?? '',
           phone: item.phone ?? '',
+          billingDay: billDay, // 🔥 Pass it here
           installments: [],
         );
       }
@@ -234,6 +243,7 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
       ..sort((a, b) => b.totalRemaining.compareTo(a.totalRemaining));
   }
 
+  // ... _calculateSummary ... (Keep as is)
   Map<String, double> _calculateSummary(List<PlayerConsolidatedSummary> items) {
     double expected = 0;
     double collected = 0;
@@ -266,7 +276,7 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
     }
 
     return Scaffold(
-      extendBodyBehindAppBar: true, // IMPORTANT FOR GRADIENT
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
         title: Text(titleText, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
         backgroundColor: Colors.transparent,
@@ -280,10 +290,9 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
             ),
           IconButton(icon: const Icon(Icons.refresh, color: Colors.white), onPressed: _loadAllData),
 
-          // Custom Styled Popup Menu
           PopupMenuButton<String>(
             icon: const Icon(Icons.filter_list, color: Colors.white),
-            color: const Color(0xFF203A43), // Dark Background
+            color: const Color(0xFF203A43),
             initialValue: _currentFilter,
             onSelected: (String val) {
               setState(() {
@@ -312,40 +321,26 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
       ),
       body: Stack(
         children: [
-          // 1. BACKGROUND GRADIENT
           Container(
             decoration: const BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [
-                  Color(0xFF0F2027), // Deep Black-Blue
-                  Color(0xFF203A43), // Slate
-                  Color(0xFF2C5364), // Teal-Dark
-                ],
+                colors: [Color(0xFF0F2027), Color(0xFF203A43), Color(0xFF2C5364)],
               ),
             ),
           ),
-
-          // 2. GLOWING ORBS
           Positioned(
             top: -50, right: -50,
-            child: Container(
-              height: 200, width: 200,
-              decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.purple.withOpacity(0.2), boxShadow: [BoxShadow(color: Colors.purple.withOpacity(0.2), blurRadius: 100, spreadRadius: 50)]),
-            ),
+            child: Container(height: 200, width: 200, decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.purple.withOpacity(0.2), boxShadow: [BoxShadow(color: Colors.purple.withOpacity(0.2), blurRadius: 100, spreadRadius: 50)])),
           ),
           Positioned(
             bottom: 100, left: -50,
-            child: Container(
-              height: 200, width: 200,
-              decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.blue.withOpacity(0.2), boxShadow: [BoxShadow(color: Colors.blue.withOpacity(0.2), blurRadius: 100, spreadRadius: 50)]),
-            ),
+            child: Container(height: 200, width: 200, decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.blue.withOpacity(0.2), boxShadow: [BoxShadow(color: Colors.blue.withOpacity(0.2), blurRadius: 100, spreadRadius: 50)])),
           ),
 
-          // 3. MAIN CONTENT
           SafeArea(
-            child: _isLoading
+            child: _isLoading && groupedItems.isEmpty
                 ? const Center(child: CircularProgressIndicator(color: Colors.cyanAccent))
                 : groupedItems.isEmpty
                 ? Center(
@@ -366,7 +361,6 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
                 padding: const EdgeInsets.only(top: 10, bottom: 80),
                 itemCount: groupedItems.length + 1,
                 itemBuilder: (ctx, i) {
-                  // 1. Show Header
                   if (i == 0) {
                     return FinancialSummaryCard(
                       title: headerTitle,
@@ -377,14 +371,15 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
                     );
                   }
 
-                  // 2. Show List
                   final group = groupedItems[i - 1];
 
                   final player = Player(
                       id: group.playerId,
                       name: group.playerName,
                       group: group.groupName,
-                      phone: group.phone);
+                      phone: group.phone,
+                      billingDay: group.billingDay // 🔥 PASS BILLING DAY TO PLAYER OBJECT
+                  );
 
                   final summary = PlayerInstallmentSummary(
                     playerId: group.playerId,
@@ -393,6 +388,9 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
                     installmentAmount: group.totalAmount,
                     remaining: group.totalRemaining,
                     status: group.totalRemaining > 0 ? 'PENDING' : 'PAID',
+                    lastPaymentDate: group.installments.isNotEmpty
+                        ? group.installments.first.lastPaymentDate
+                        : null,
                   );
 
                   return Padding(

@@ -2,16 +2,19 @@ class Player {
   final int id;
   final String name;
   final String phone;
-  final String group; // groupName
+  final String group;
   final int? groupId;
   final int? age;
   final DateTime? joinDate;
   final String? photoUrl;
   final String? notes;
 
-  // ✅ NEW FIELDS
+  // ✅ BILLING FIELDS
   final int? billingDay;
-  final int? paymentCycleMonths; // 1 = Monthly, 3 = Quarterly
+  final int? paymentCycleMonths;
+
+  // 🔥 NEW FIELD: Holiday/Left Status
+  final bool isActive;
 
   Player({
     required this.id,
@@ -25,10 +28,11 @@ class Player {
     this.notes,
     this.billingDay,
     this.paymentCycleMonths,
+    this.isActive = true, // Default to true (Active)
   });
 
   factory Player.fromJson(Map<String, dynamic> json) {
-    // group detection logic (same as before)
+    // 1. Group Detection
     String groupVal = '';
     if (json['group'] is String) {
       groupVal = json['group'] ?? '';
@@ -40,22 +44,31 @@ class Player {
       groupVal = json['group']?['name'] ?? '';
     }
 
+    // 2. ID Parsing
+    // 1. Safe ID Parsing
     int idVal = 0;
     if (json['id'] != null) {
-      idVal = (json['id'] is int) ? json['id'] as int : int.tryParse(json['id'].toString()) ?? 0;
+      if (json['id'] is int) {
+        idVal = json['id'];
+      } else if (json['id'] is String) {
+        idVal = int.tryParse(json['id']) ?? 0;
+      }
     }
 
+    // 3. Group ID
     int? gid;
     final gvRaw = json['groupId'] ?? json['group_id'];
     if (gvRaw != null) {
       gid = (gvRaw is int) ? gvRaw : int.tryParse(gvRaw.toString());
     }
 
+    // 4. Age
     int? ageVal;
     if (json['age'] != null) {
       ageVal = (json['age'] is int) ? json['age'] as int : int.tryParse(json['age'].toString());
     }
 
+    // 5. Join Date
     DateTime? jd;
     final jdRaw = json['joinDate'] ?? json['join_date'];
     if (jdRaw != null) {
@@ -66,20 +79,42 @@ class Player {
       }
     }
 
-    // photoUrl & notes
+    // 6. Photo & Notes
     final String? photo = (json['photoUrl'] as String?) ??
         (json['photo_url'] as String?) ??
         (json['photo'] as String?);
     final String? notesVal = (json['notes'] as String?) ?? (json['note'] as String?);
 
-    // ✅ Map New Fields
-    final int? bDay = (json['billingDay'] is int) ? json['billingDay'] : int.tryParse(json['billingDay']?.toString() ?? '');
-    final int? pCycle = (json['paymentCycleMonths'] is int) ? json['paymentCycleMonths'] : int.tryParse(json['paymentCycleMonths']?.toString() ?? '');
+    // 7. Billing Day Logic
+    var bDayRaw = json['billingDay'] ?? json['billing_day'];
+    int? bDay;
+    if (bDayRaw != null) {
+      bDay = (bDayRaw is int) ? bDayRaw : int.tryParse(bDayRaw.toString());
+    }
+
+    // 8. Payment Cycle Logic
+    var pCycleRaw = json['paymentCycleMonths'] ?? json['payment_cycle_months'];
+    int? pCycle;
+    if (pCycleRaw != null) {
+      pCycle = (pCycleRaw is int) ? pCycleRaw : int.tryParse(pCycleRaw.toString());
+    }
+
+    // 🔥 9. NEW: Active Status Logic (Handle both camelCase & snake_case)
+    bool activeVal = true; // Default
+    if (json['isActive'] != null) {
+      activeVal = json['isActive'] as bool;
+    } else if (json['is_active'] != null) {
+      // Sometimes raw SQL returns 1/0 instead of true/false
+      if (json['is_active'] is int) {
+        activeVal = json['is_active'] == 1;
+      } else {
+        activeVal = json['is_active'];
+      }
+    }
 
     return Player(
       id: idVal,
-      name: json['name'] ?? '',
-      phone: json['phone'] ?? '',
+      name: json['name'] ?? 'Unknown',      phone: json['phone'] ?? '',
       group: groupVal,
       groupId: gid,
       age: ageVal,
@@ -88,6 +123,7 @@ class Player {
       notes: notesVal,
       billingDay: bDay,
       paymentCycleMonths: pCycle,
+      isActive: activeVal, // 🔥 Mapped here
     );
   }
 
@@ -103,5 +139,6 @@ class Player {
     'notes': notes,
     'billingDay': billingDay,
     'paymentCycleMonths': paymentCycleMonths,
+    'isActive': isActive, // 🔥 Added here
   };
 }

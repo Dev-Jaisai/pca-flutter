@@ -46,13 +46,15 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     await _fetchFromApi();
   }
-
   Future<void> _fetchFromApi() async {
     try {
-      setState(() => _bgFetching = true);
+      if (mounted) setState(() => _bgFetching = true); // Check mounted
+
       final players = await ApiService.fetchPlayers();
       await DataManager().saveData(players, []);
-      if (!mounted) return;
+
+      if (!mounted) return; // Check again before setState
+
       setState(() {
         _players = players;
         _showShimmer = false;
@@ -61,7 +63,7 @@ class _HomeScreenState extends State<HomeScreen> {
       debugPrint('HomeScreen: fetchFromApi failed: $e');
       if (mounted && _players.isEmpty) setState(() => _showShimmer = false);
     } finally {
-      if (mounted) setState(() => _bgFetching = false);
+      if (mounted) setState(() => _bgFetching = false); // Check mounted
     }
   }
 
@@ -195,6 +197,10 @@ class _HomeScreenState extends State<HomeScreen> {
               child: InkWell(
                 borderRadius: BorderRadius.circular(16),
                 onTap: () {
+                  if (p.id == null || p.id == 0) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: Invalid Player ID")));
+                    return;
+                  }
                   Navigator.push(
                     context,
                     MaterialPageRoute(builder: (_) => InstallmentsScreen(player: p)),

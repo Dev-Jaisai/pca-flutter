@@ -7,7 +7,6 @@ import 'screens/landing/intro_landing_screen.dart';
 import 'screens/landing/landing_screen.dart';
 import 'screens/home/home_screen.dart';
 import 'screens/home/add_player_screen.dart';
-import 'screens/groups/group_list_screen.dart';
 import 'screens/fees/fee_list_screen.dart';
 import 'screens/payments/payment_list_screen.dart';
 import 'screens/installments/installment_summary_screen.dart';
@@ -63,7 +62,6 @@ class MyApp extends StatelessWidget {
         // Other routes
         '/players': (ctx) => const HomeScreen(),
         '/players/add': (ctx) => const AddPlayerScreen(),
-        '/groups': (ctx) => const GroupListScreen(),
         '/fees': (ctx) => const FeeListScreen(),
         '/all-players-installments': (ctx) => const AllPlayersInstallmentsScreen(),
         '/sms-reminders': (ctx) => const SmsReminderScreen(),

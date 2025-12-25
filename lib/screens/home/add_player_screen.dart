@@ -1,7 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:hive_flutter/hive_flutter.dart';
 import '../../models/group.dart';
 import '../../services/api_service.dart';
 import '../../utils/event_bus.dart';
@@ -15,6 +14,8 @@ class AddPlayerScreen extends StatefulWidget {
 
 class _AddPlayerScreenState extends State<AddPlayerScreen> {
   final _formKey = GlobalKey<FormState>();
+
+  // Controllers
   final _nameCtl = TextEditingController();
   final _phoneCtl = TextEditingController();
   final _ageCtl = TextEditingController();
@@ -26,9 +27,6 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
   DateTime? _joinDate = DateTime.now();
   DateTime? _installmentDueDate;
   bool _isLoading = false;
-  Map<String, double> _fees = {};
-
-  // ✅ Payment Cycle (Default 1 Month)
   int _paymentCycleMonths = 1;
 
   @override
@@ -79,7 +77,7 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
       setState(() {
         if (isJoin) {
           _joinDate = picked;
-          // Optional: Join Date बदलली तर Installment Date पण अपडेट करा
+          // Auto-update Billing Date
           _installmentDueDate = DateTime(picked.year, picked.month + _paymentCycleMonths, picked.day);
         } else {
           _installmentDueDate = picked;
@@ -98,7 +96,6 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // ✅ Create Player (Backend will auto-create installment)
       await ApiService.createPlayer(
         name: _nameCtl.text.trim(),
         phone: _phoneCtl.text.trim(),
@@ -107,8 +104,6 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
         groupId: _selectedGroupId!,
         notes: _notesCtl.text.isEmpty ? null : _notesCtl.text.trim(),
         photoUrl: _photoCtl.text.isEmpty ? null : _photoCtl.text.trim(),
-
-        // ✨ Passing New Fields
         firstInstallmentDate: _installmentDueDate,
         paymentCycleMonths: _paymentCycleMonths,
       );
@@ -162,15 +157,22 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
                           const SizedBox(height: 16),
                           _neonTextField(_phoneCtl, 'Phone', Icons.phone, type: TextInputType.phone),
                           const SizedBox(height: 16),
+
                           Row(
                             children: [
-                              Expanded(child: _neonTextField(_ageCtl, 'Age', Icons.cake, type: TextInputType.number)),
+                              Expanded(
+                                  child: _neonTextField(_ageCtl, 'Age', Icons.cake, type: TextInputType.number)
+                              ),
                               const SizedBox(width: 12),
-                              Expanded(child: _neonSelector(
-                                  label: _joinDate == null ? 'Join Date' : df.format(_joinDate!),
-                                  icon: Icons.calendar_today,
-                                  onTap: () => _pickDate(true)
-                              )),
+                              Expanded(
+                                // 🔥 Join Date Box Selector
+                                  child: _neonSelector(
+                                    label: "Join Date",  // Label inside box
+                                    value: _joinDate == null ? 'Select Date' : df.format(_joinDate!),
+                                    icon: Icons.calendar_today,
+                                    onTap: () => _pickDate(true),
+                                  )
+                              ),
                             ],
                           ),
                           const SizedBox(height: 16),
@@ -186,44 +188,45 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
                           ),
                           const SizedBox(height: 16),
 
-                          // ✅ NEW: Payment Cycle Dropdown with Auto-Date Logic
+                          // Payment Cycle
                           DropdownButtonFormField<int>(
                             value: _paymentCycleMonths,
                             dropdownColor: const Color(0xFF2C5364),
                             style: const TextStyle(color: Colors.white),
                             decoration: _inputDeco('Payment Cycle', Icons.loop),
-                            items: const [
-                              DropdownMenuItem(value: 1, child: Text("Monthly (Every Month)")),
-                              DropdownMenuItem(value: 3, child: Text("Quarterly (Every 3 Months)")),
-                            ],
+                            items: List.generate(12, (index) {
+                              int month = index + 1;
+                              String label = "$month Month${month > 1 ? 's' : ''}";
+                              if (month == 1) label += " (Monthly)";
+                              if (month == 3) label += " (Quarterly)";
+                              if (month == 6) label += " (Half-Yearly)";
+                              if (month == 12) label += " (Yearly)";
+                              return DropdownMenuItem(value: month, child: Text(label));
+                            }),
                             onChanged: (val) {
                               if (val != null) {
                                 setState(() {
                                   _paymentCycleMonths = val;
-
-                                  // 🔥 MAGIC LOGIC: Automatically set next date
-                                  // Join Date (किंवा आज) + Selected Months
                                   DateTime baseDate = _joinDate ?? DateTime.now();
-
-                                  _installmentDueDate = DateTime(
-                                      baseDate.year,
-                                      baseDate.month + val, // 1 महिना किंवा 3 महिने ऍड करा
-                                      baseDate.day
-                                  );
+                                  _installmentDueDate = DateTime(baseDate.year, baseDate.month + val, baseDate.day);
                                 });
                               }
                             },
                           ),
-
                           const SizedBox(height: 16),
-                          const Text(" Billing Start Date (Fixes the Cycle)", style: TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 5),
+
+                          const Text("Billing Details", style: TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 8),
+
+                          // 🔥 Billing Date Box Selector
                           _neonSelector(
-                              label: _installmentDueDate == null ? 'Select Date' : df.format(_installmentDueDate!),
+                              label: "Billing Start Date", // Label inside box
+                              value: _installmentDueDate == null ? 'Select Date' : df.format(_installmentDueDate!),
                               icon: Icons.event_available,
                               onTap: () => _pickDate(false),
                               isHighlight: true
                           ),
+
                           const SizedBox(height: 8),
                           Text(
                             "Note: This date determines the billing day for all future payments.",
@@ -256,7 +259,8 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
     );
   }
 
-  // Helper widgets
+  // --- Helper Methods ---
+
   Widget _neonTextField(TextEditingController ctl, String label, IconData icon, {TextInputType type = TextInputType.text, int maxLines = 1}) {
     return TextFormField(
       controller: ctl,
@@ -280,11 +284,12 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
     );
   }
 
-  Widget _neonSelector({required String label, required IconData icon, required VoidCallback onTap, bool isHighlight = false}) {
+  // 🔥 RESTORED BOX DESIGN WITH LABEL INSIDE
+  Widget _neonSelector({required String label, required String value, required IconData icon, required VoidCallback onTap, bool isHighlight = false}) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        height: 60,
+        height: 60, // Fixed height similar to TextFields
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
           color: Colors.black.withOpacity(0.3),
@@ -295,7 +300,23 @@ class _AddPlayerScreenState extends State<AddPlayerScreen> {
           children: [
             Icon(icon, color: isHighlight ? Colors.purpleAccent : Colors.cyanAccent.withOpacity(0.7)),
             const SizedBox(width: 12),
-            Expanded(child: Text(label, style: const TextStyle(color: Colors.white))),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // 🔹 Label inside box (Small)
+                Text(
+                    label,
+                    style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 10)
+                ),
+                const SizedBox(height: 2),
+                // 🔹 Value inside box (Big)
+                Text(
+                    value,
+                    style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500)
+                ),
+              ],
+            ),
           ],
         ),
       ),
