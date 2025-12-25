@@ -5,29 +5,7 @@ import '../../models/player_installment_summary.dart';
 import '../../services/api_service.dart';
 import '../../services/data_manager.dart';
 import '../../widgets/FinancialSummaryCard.dart';
-import '../../widgets/PlayerSummaryCard.dart';
-
-class PlayerConsolidatedSummary {
-  final int playerId;
-  final String playerName;
-  final String groupName;
-  final String phone;
-  double totalAmount;
-  double totalPaid;
-  double totalRemaining;
-  List<PlayerInstallmentSummary> installments;
-
-  PlayerConsolidatedSummary({
-    required this.playerId,
-    required this.playerName,
-    required this.groupName,
-    required this.phone,
-    this.totalAmount = 0.0,
-    this.totalPaid = 0.0,
-    this.totalRemaining = 0.0,
-    required this.installments,
-  });
-}
+import '../../widgets/PlayerSummaryCard.dart'; // ✅ हे widget अपडेटेड असावे
 
 class AllInstallmentsScreen extends StatefulWidget {
   final String? initialFilter;
@@ -39,7 +17,9 @@ class AllInstallmentsScreen extends StatefulWidget {
 }
 
 class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
-  List<PlayerInstallmentSummary> _allItems = [];
+  // 🔥 Data Structure: List of Maps containing Player + Summary + List of Installments
+  List<Map<String, dynamic>> _groupedList = [];
+
   bool _isLoading = true;
   String? _error;
   String _currentFilter = 'All';
@@ -59,38 +39,168 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
   }
 
   Future<void> _loadAllData() async {
-    final cachedData = await DataManager().getCachedAllInstallments();
-    if (cachedData != null && cachedData.isNotEmpty) {
-      if (mounted) {
-        setState(() {
-          _allItems = cachedData;
-          _isLoading = false;
-        });
-      }
-    } else {
-      if (mounted) setState(() => _isLoading = true);
-    }
+    setState(() => _isLoading = true);
 
     try {
-      final List<PlayerInstallmentSummary> list = await ApiService.fetchAllInstallmentsSummary(page: 0, size: 2000);
-      await DataManager().saveAllInstallments(list);
+      // 1. Fetch Players (Billing Day साठी हे गरजेचे आहे)
+      var players = await DataManager().getPlayers();
+      if (players.isEmpty) {
+        players = await ApiService.fetchPlayers();
+        await DataManager().saveData(players, []);
+      }
+      // Player Map बनवला (Fast Lookup साठी)
+      final playerMap = {for (var p in players) p.id: p};
+
+      // 2. Fetch Installments
+      final cachedData = await DataManager().getCachedAllInstallments();
+      List<PlayerInstallmentSummary> rawList = [];
+
+      if (cachedData != null && cachedData.isNotEmpty) {
+        rawList = cachedData;
+      } else {
+        // Cache नसेल तर API कॉल करा
+        rawList = await ApiService.fetchAllInstallmentsSummary(page: 0, size: 5000);
+        await DataManager().saveAllInstallments(rawList);
+      }
+
+      // 3. Process & Group Data
       if (mounted) {
+        _processGroupedData(rawList, playerMap);
         setState(() {
-          _allItems = list;
           _isLoading = false;
           _error = null;
         });
       }
     } catch (e) {
-      if (mounted && _allItems.isEmpty) {
+      if (mounted) {
         setState(() {
           _isLoading = false;
-          _error = e.toString();
+          if (_groupedList.isEmpty) _error = e.toString();
         });
       }
     }
   }
 
+  void _processGroupedData(List<PlayerInstallmentSummary> rawList, Map<int, Player> playerMap) {
+    // A. Filter Raw List based on selection
+    List<PlayerInstallmentSummary> filteredList = [];
+
+    if (_currentFilter == 'Due (Month)' || _currentFilter == 'Upcoming') {
+      filteredList = rawList.where((p) {
+        if (p.dueDate == null) return false;
+        return p.dueDate!.year == _selectedMonth.year &&
+            p.dueDate!.month == _selectedMonth.month;
+      }).toList();
+    } else {
+      // 'All' filter -> Sagle gheun taka, group logic handle karel
+      filteredList = rawList;
+    }
+
+    // B. Group By Player ID
+    Map<int, List<PlayerInstallmentSummary>> grouped = {};
+    for (var item in filteredList) {
+      if (item.playerId == null) continue;
+      if (!grouped.containsKey(item.playerId)) {
+        grouped[item.playerId!] = [];
+      }
+      grouped[item.playerId!]!.add(item);
+    }
+
+    // C. Convert to Display List
+    List<Map<String, dynamic>> result = [];
+
+    grouped.forEach((pid, installments) {
+      if (!playerMap.containsKey(pid)) return;
+
+      final player = playerMap[pid]!;
+
+      // Calculate Totals per Player
+      double totalPaid = 0;
+      double totalRemaining = 0;
+      double totalAmount = 0;
+
+      // Find 'Main' status logic
+      String mainStatus = 'PAID';
+      DateTime? latestPaymentDate;
+
+      // Sort Installments: Latest First (Newest Month Top)
+      installments.sort((a, b) {
+        DateTime dateA = a.dueDate ?? DateTime(2000);
+        DateTime dateB = b.dueDate ?? DateTime(2000);
+        return dateB.compareTo(dateA);
+      });
+
+      for (var inst in installments) {
+        totalAmount += (inst.installmentAmount ?? 0);
+        totalPaid += inst.totalPaid;
+        totalRemaining += (inst.remaining ?? 0);
+
+        // Status Logic: Jar ekjari pending asel tar status PENDING
+        if ((inst.remaining ?? 0) > 0) {
+          mainStatus = 'PENDING';
+        }
+
+        // Jar Latest Payment Date update karaychi asel
+        if (inst.lastPaymentDate != null) {
+          if (latestPaymentDate == null || inst.lastPaymentDate!.isAfter(latestPaymentDate)) {
+            latestPaymentDate = inst.lastPaymentDate;
+          }
+        }
+      }
+
+      // Special: Jar overdue asel tar status OVERDUE kara (Check latest due date)
+      if (installments.isNotEmpty && totalRemaining > 0) {
+        if (installments.first.dueDate != null && installments.first.dueDate!.isBefore(DateTime.now())) {
+          // mainStatus logic PlayerSummaryCard madhye ahe, pan ethe PENDING thevla tari chalel
+        }
+      }
+
+      // Latest Installment (Header saathi)
+      final latestInst = installments.isNotEmpty ? installments.first : null;
+
+      // Create Aggregate Summary
+      final summary = PlayerInstallmentSummary(
+          playerId: pid,
+          playerName: player.name,
+          totalPaid: totalPaid,
+          installmentAmount: totalAmount,
+          remaining: totalRemaining,
+          status: mainStatus,
+          lastPaymentDate: latestPaymentDate,
+          dueDate: latestInst?.dueDate, // Latest date pass kara
+          installmentId: latestInst?.installmentId
+      );
+
+      result.add({
+        'player': player,
+        'summary': summary,
+        'installments': installments // 🔥 List pass kara chips sathi
+      });
+    });
+
+    // D. Final Sort (Jyanche paise baki ahet te var)
+    result.sort((a, b) {
+      double remA = (a['summary'] as PlayerInstallmentSummary).remaining ?? 0;
+      double remB = (b['summary'] as PlayerInstallmentSummary).remaining ?? 0;
+      return remB.compareTo(remA);
+    });
+
+    _groupedList = result;
+  }
+
+  // ... (Summary Stats Calculation) ...
+  Map<String, double> _calculateStats() {
+    double expected = 0, collected = 0, pending = 0;
+    for (var item in _groupedList) {
+      final s = item['summary'] as PlayerInstallmentSummary;
+      expected += (s.installmentAmount ?? 0);
+      collected += s.totalPaid;
+      pending += (s.remaining ?? 0);
+    }
+    return {'expected': expected, 'collected': collected, 'pending': pending};
+  }
+
+  // ... (Date Picker Logic) ...
   Future<void> _pickMonthForFilter() async {
     final now = DateTime.now();
     final picked = await showDialog<DateTime>(
@@ -100,7 +210,7 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
         int selectedMonth = _selectedMonth.month;
         return StatefulBuilder(builder: (context, setStateDialog) {
           return AlertDialog(
-            backgroundColor: const Color(0xFF203A43), // Dark Dialog
+            backgroundColor: const Color(0xFF203A43),
             title: const Text("Select Month", style: TextStyle(color: Colors.white)),
             content: Row(
               children: [
@@ -109,14 +219,8 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
                     value: selectedMonth,
                     dropdownColor: const Color(0xFF2C5364),
                     style: const TextStyle(color: Colors.white),
-                    decoration: const InputDecoration(
-                      enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white54)),
-                    ),
-                    items: List.generate(
-                        12,
-                            (i) => DropdownMenuItem(
-                            value: i + 1,
-                            child: Text(DateFormat('MMM').format(DateTime(2024, i + 1))))),
+                    decoration: const InputDecoration(enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white54))),
+                    items: List.generate(12, (i) => DropdownMenuItem(value: i + 1, child: Text(DateFormat('MMM').format(DateTime(2024, i + 1))))),
                     onChanged: (v) => setStateDialog(() => selectedMonth = v!),
                   ),
                 ),
@@ -126,23 +230,15 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
                     value: selectedYear,
                     dropdownColor: const Color(0xFF2C5364),
                     style: const TextStyle(color: Colors.white),
-                    decoration: const InputDecoration(
-                      enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white54)),
-                    ),
-                    items: List.generate(
-                        5,
-                            (i) => DropdownMenuItem(
-                            value: now.year - 2 + i,
-                            child: Text('${now.year - 2 + i}'))),
+                    decoration: const InputDecoration(enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white54))),
+                    items: List.generate(5, (i) => DropdownMenuItem(value: now.year - 2 + i, child: Text('${now.year - 2 + i}'))),
                     onChanged: (v) => setStateDialog(() => selectedYear = v!),
                   ),
                 ),
               ],
             ),
             actions: [
-              TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text("Cancel", style: TextStyle(color: Colors.white54))),
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel", style: TextStyle(color: Colors.white54))),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.cyanAccent, foregroundColor: Colors.black),
                 onPressed: () => Navigator.pop(context, DateTime(selectedYear, selectedMonth, 1)),
@@ -154,119 +250,30 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
       },
     );
     if (picked != null) {
-      setState(() => _selectedMonth = picked);
-    }
-  }
-
-  List<PlayerInstallmentSummary> _getFilteredRawItems() {
-    if (_currentFilter == 'All') return _allItems;
-
-    if (_currentFilter == 'Upcoming') {
-      return _allItems.where((p) {
-        if (p.dueDate == null) return false;
-        final st = (p.status ?? '').toUpperCase().replaceAll('_', ' ').trim();
-        if (st == 'PAID') return false;
-        return p.dueDate!.year == _selectedMonth.year &&
-            p.dueDate!.month == _selectedMonth.month;
-      }).toList();
-    }
-
-    if (_currentFilter == 'Due (Month)') {
-      return _allItems.where((p) {
-        if (p.dueDate == null) return false;
-        return p.dueDate!.year == _selectedMonth.year &&
-            p.dueDate!.month == _selectedMonth.month;
-      }).toList();
-    }
-
-    final filterUpper = _currentFilter.toUpperCase();
-    return _allItems.where((p) {
-      final st = (p.status ?? '').toUpperCase().replaceAll('_', ' ').trim();
-      return st == filterUpper;
-    }).toList();
-  }
-
-  List<PlayerConsolidatedSummary> _getGroupedItems() {
-    final rawItems = _getFilteredRawItems();
-    final Map<int, PlayerConsolidatedSummary> groupedMap = {};
-
-    for (var item in rawItems) {
-      if (item.playerId == null) continue;
-      if (!groupedMap.containsKey(item.playerId)) {
-        groupedMap[item.playerId!] = PlayerConsolidatedSummary(
-          playerId: item.playerId!,
-          playerName: item.playerName,
-          groupName: item.groupName ?? '',
-          phone: item.phone ?? '',
-          installments: [],
-        );
-      }
-      final summary = groupedMap[item.playerId]!;
-      summary.totalAmount += (item.installmentAmount ?? 0.0);
-      summary.totalPaid += (item.totalPaid ?? 0.0);
-      summary.installments.add(item);
-    }
-
-    for (var summary in groupedMap.values) {
-      summary.totalRemaining = summary.totalAmount - summary.totalPaid;
-
-      // Sorting Logic (Unpaid Top, then Paid)
-      summary.installments.sort((a, b) {
-        bool isPaidA = (a.status ?? '').toUpperCase() == 'PAID';
-        bool isPaidB = (b.status ?? '').toUpperCase() == 'PAID';
-
-        if (isPaidA != isPaidB) {
-          return isPaidA ? 1 : -1;
-        }
-
-        DateTime dateA = a.dueDate ?? DateTime(2000);
-        DateTime dateB = b.dueDate ?? DateTime(2000);
-
-        if (isPaidA) {
-          return dateB.compareTo(dateA);
-        } else {
-          return dateA.compareTo(dateB);
-        }
+      setState(() {
+        _selectedMonth = picked;
+        _loadAllData(); // Reload
       });
     }
-
-    return groupedMap.values.toList()
-      ..sort((a, b) => b.totalRemaining.compareTo(a.totalRemaining));
-  }
-
-  Map<String, double> _calculateSummary(List<PlayerConsolidatedSummary> items) {
-    double expected = 0;
-    double collected = 0;
-    double pending = 0;
-    for (var i in items) {
-      expected += i.totalAmount;
-      collected += i.totalPaid;
-      pending += i.totalRemaining;
-    }
-    return {'expected': expected, 'collected': collected, 'pending': pending};
   }
 
   @override
   Widget build(BuildContext context) {
-    final groupedItems = _getGroupedItems();
-    final stats = _calculateSummary(groupedItems);
+    final stats = _calculateStats();
 
+    // Title Logic
     String titleText = 'All Installments';
     String headerTitle = "Total Summary";
-
     if (_currentFilter == 'Due (Month)') {
       titleText = 'Due: ${DateFormat('MMM yyyy').format(_selectedMonth)}';
       headerTitle = DateFormat('MMMM yyyy').format(_selectedMonth);
     } else if (_currentFilter == 'Upcoming') {
       titleText = 'Upcoming: ${DateFormat('MMM yyyy').format(_selectedMonth)}';
       headerTitle = "Upcoming (${DateFormat('MMM').format(_selectedMonth)})";
-    } else if (_currentFilter != 'All') {
-      titleText = '$_currentFilter Players';
-      headerTitle = "$_currentFilter List";
     }
 
     return Scaffold(
-      extendBodyBehindAppBar: true, // IMPORTANT FOR GRADIENT
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
         title: Text(titleText, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
         backgroundColor: Colors.transparent,
@@ -280,10 +287,9 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
             ),
           IconButton(icon: const Icon(Icons.refresh, color: Colors.white), onPressed: _loadAllData),
 
-          // Custom Styled Popup Menu
           PopupMenuButton<String>(
             icon: const Icon(Icons.filter_list, color: Colors.white),
-            color: const Color(0xFF203A43), // Dark Background
+            color: const Color(0xFF203A43),
             initialValue: _currentFilter,
             onSelected: (String val) {
               setState(() {
@@ -297,57 +303,34 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
                 if (_currentFilter == 'Due (Month)') {
                   _selectedMonth = DateTime.now();
                 }
+                _loadAllData();
               });
             },
             itemBuilder: (context) => [
               const PopupMenuItem(value: 'All', child: Text('All Installments', style: TextStyle(color: Colors.white))),
               const PopupMenuItem(value: 'Due (Month)', child: Text('This Month Due', style: TextStyle(color: Colors.white))),
-              const PopupMenuItem(value: 'Upcoming', child: Text('Upcoming (Next Month)', style: TextStyle(color: Colors.white))),
-              const PopupMenuDivider(height: 1),
-              const PopupMenuItem(value: 'Paid', child: Text('Paid Players', style: TextStyle(color: Colors.greenAccent))),
-              const PopupMenuItem(value: 'Pending', child: Text('Pending Players', style: TextStyle(color: Colors.redAccent))),
+              const PopupMenuItem(value: 'Upcoming', child: Text('Upcoming', style: TextStyle(color: Colors.white))),
             ],
           ),
         ],
       ),
       body: Stack(
         children: [
-          // 1. BACKGROUND GRADIENT
+          // Background
           Container(
             decoration: const BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [
-                  Color(0xFF0F2027), // Deep Black-Blue
-                  Color(0xFF203A43), // Slate
-                  Color(0xFF2C5364), // Teal-Dark
-                ],
+                colors: [Color(0xFF0F2027), Color(0xFF203A43), Color(0xFF2C5364)],
               ),
             ),
           ),
 
-          // 2. GLOWING ORBS
-          Positioned(
-            top: -50, right: -50,
-            child: Container(
-              height: 200, width: 200,
-              decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.purple.withOpacity(0.2), boxShadow: [BoxShadow(color: Colors.purple.withOpacity(0.2), blurRadius: 100, spreadRadius: 50)]),
-            ),
-          ),
-          Positioned(
-            bottom: 100, left: -50,
-            child: Container(
-              height: 200, width: 200,
-              decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.blue.withOpacity(0.2), boxShadow: [BoxShadow(color: Colors.blue.withOpacity(0.2), blurRadius: 100, spreadRadius: 50)]),
-            ),
-          ),
-
-          // 3. MAIN CONTENT
           SafeArea(
-            child: _isLoading
+            child: _isLoading && _groupedList.isEmpty
                 ? const Center(child: CircularProgressIndicator(color: Colors.cyanAccent))
-                : groupedItems.isEmpty
+                : _groupedList.isEmpty
                 ? Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -364,44 +347,32 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
               backgroundColor: const Color(0xFF203A43),
               child: ListView.builder(
                 padding: const EdgeInsets.only(top: 10, bottom: 80),
-                itemCount: groupedItems.length + 1,
+                // Header + List Items
+                itemCount: _groupedList.length + 1,
                 itemBuilder: (ctx, i) {
-                  // 1. Show Header
+                  // 0th Index = Financial Summary Card
                   if (i == 0) {
                     return FinancialSummaryCard(
                       title: headerTitle,
                       totalTarget: stats['expected']!,
                       totalCollected: stats['collected']!,
                       totalPending: stats['pending']!,
-                      countLabel: "${groupedItems.length} Players",
+                      countLabel: "${_groupedList.length} Players",
                     );
                   }
 
-                  // 2. Show List
-                  final group = groupedItems[i - 1];
-
-                  final player = Player(
-                      id: group.playerId,
-                      name: group.playerName,
-                      group: group.groupName,
-                      phone: group.phone);
-
-                  final summary = PlayerInstallmentSummary(
-                    playerId: group.playerId,
-                    playerName: group.playerName,
-                    totalPaid: group.totalPaid,
-                    installmentAmount: group.totalAmount,
-                    remaining: group.totalRemaining,
-                    status: group.totalRemaining > 0 ? 'PENDING' : 'PAID',
-                  );
+                  // Player Cards
+                  final item = _groupedList[i - 1];
+                  final player = item['player'] as Player;
+                  final summary = item['summary'] as PlayerInstallmentSummary;
+                  final installments = item['installments'] as List<PlayerInstallmentSummary>;
 
                   return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     child: PlayerSummaryCard(
                       player: player,
                       summary: summary,
-                      installments: group.installments,
-                      nextScreenFilter: _currentFilter == 'Overdue' ? 'Overdue' : null,
+                      installments: installments, // 🔥 LIST PASSED HERE
                     ),
                   );
                 },

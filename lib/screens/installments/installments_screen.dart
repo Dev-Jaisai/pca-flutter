@@ -38,18 +38,28 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
   List<int> _availableYears = [];
   int _selectedYear = DateTime.now().year;
 
+
   @override
   void initState() {
     super.initState();
+    print("📢 Opening Installments for Player ID: ${widget.player.id}"); // Debug Print
+
+    if (widget.player.id == 0) {
+      print("❌ ERROR: Player ID is 0 or Invalid!");
+      setState(() {
+        _error = "Invalid Player Data";
+        _isLoading = false;
+      });
+      return;
+    }
+
     if (widget.initialFilter != null) {
       _currentFilter = widget.initialFilter!;
     }
     _loadData();
   }
 
-  // 🔥 UPDATED: Added useCache parameter for instant refresh
   Future<void> _loadData({bool useCache = true}) async {
-    // 1. If using cache, try to show old data first
     if (useCache) {
       final cached = await DataManager().getInstallmentsForPlayer(widget.player.id);
       if (cached.isNotEmpty) {
@@ -58,12 +68,10 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
         if (mounted) setState(() => _isLoading = true);
       }
     } else {
-      // If NOT using cache (Force Refresh), show loading immediately
       if (mounted) setState(() => _isLoading = true);
     }
 
     try {
-      // 2. Fetch fresh data (If useCache is false, forceRefresh becomes true)
       final freshData = await DataManager().getInstallmentsForPlayer(
           widget.player.id,
           forceRefresh: !useCache
@@ -79,6 +87,7 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
   void _processData(List<Installment> list) {
     if (!mounted) return;
 
+    // Sort: Latest Year -> Latest Month
     list.sort((a, b) {
       int yearComp = (b.periodYear ?? 0).compareTo(a.periodYear ?? 0);
       if (yearComp != 0) return yearComp;
@@ -97,64 +106,6 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
       _isLoading = false;
       _error = null;
     });
-  }
-
-  // 🔥 NEW: Extend Due Date Logic
-  Future<void> _extendDueDate(Installment it) async {
-    final initialDate = it.dueDate ?? DateTime.now();
-
-    // 1. Pick Date
-    final DateTime? pickedDate = await showDatePicker(
-      context: context,
-      initialDate: initialDate,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2030),
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.dark(
-              primary: Colors.cyanAccent,
-              onPrimary: Colors.black,
-              surface: Color(0xFF203A43),
-              onSurface: Colors.white,
-            ),
-            dialogBackgroundColor: const Color(0xFF0F2027),
-          ),
-          child: child!,
-        );
-      },
-    );
-
-    if (pickedDate != null) {
-      String formattedDate = DateFormat('yyyy-MM-dd').format(pickedDate);
-
-      try {
-        // Show loading snackbar
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Updating date..."), duration: Duration(milliseconds: 500)),
-        );
-
-        // 2. Call API (Ensure updateDueDate exists in ApiService)
-        // await ApiService.updateDueDate(it.id, formattedDate);
-        // NOTE: If ApiService doesn't have this method yet, uncomment above line when added.
-
-        // 3. Force Refresh Data
-        DataManager().invalidatePlayerDetails(widget.player.id);
-        await _loadData(useCache: false); // 🔥 Crucial for instant update
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Due Date Updated!"), backgroundColor: Colors.green),
-          );
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Failed: $e"), backgroundColor: Colors.red),
-          );
-        }
-      }
-    }
   }
 
   // --- BULK PAYMENT DIALOG ---
@@ -209,9 +160,8 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
                           await ApiService.payUnpaid(playerId: widget.player.id, amount: amount, paymentMethod: method, reference: ref);
                         }
 
-                        // 🔥 REFRESH LOGIC
                         DataManager().invalidatePlayerDetails(widget.player.id);
-                        _loadData(useCache: false); // Force Refresh
+                        _loadData(useCache: false);
 
                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Payment Successful!"), backgroundColor: Colors.green));
                       } catch (e) {
@@ -255,7 +205,9 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
         final today = DateTime(now.year, now.month, now.day);
         final double remaining = (it.amount ?? 0) - (it.paidAmount ?? 0);
         final bool isPaid = (it.status ?? '').toUpperCase() == 'PAID';
-        return remaining > 0 && !isPaid && it.dueDate != null && it.dueDate!.isBefore(today);
+        final bool isSkipped = (it.status ?? '').toUpperCase() == 'SKIPPED';
+        // Overdue mdhye Skipped/Holiday wale dakhvu naka
+        return remaining > 0 && !isPaid && !isSkipped && it.dueDate != null && it.dueDate!.isBefore(today);
       }
       return true;
     }).toList();
@@ -266,6 +218,9 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
     final displayList = _getFilteredList();
     double totalPendingOnScreen = 0;
     for (var i in displayList) {
+      // Pending Calculation mdhye SKIPPED count karu naka
+      if ((i.status ?? '').toUpperCase() == 'SKIPPED' || (i.status ?? '').toUpperCase() == 'CANCELLED') continue;
+
       double total = i.amount ?? 0;
       double paid = i.paidAmount ?? 0;
       totalPendingOnScreen += (total - paid);
@@ -296,13 +251,11 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
       ),
       body: Stack(
         children: [
-          // Background
           Container(decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF0F2027), Color(0xFF203A43), Color(0xFF2C5364)]))),
 
           SafeArea(
             child: Column(
               children: [
-                // Year Chips
                 if (_availableYears.isNotEmpty)
                   SizedBox(
                     height: 60,
@@ -336,7 +289,6 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
                     ),
                   ),
 
-                // Total Pending Card
                 if (totalPendingOnScreen > 0)
                   Container(
                     margin: const EdgeInsets.all(16),
@@ -367,7 +319,6 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
                     ),
                   ),
 
-                // List
                 Expanded(
                   child: _isLoading
                       ? const Center(child: CircularProgressIndicator(color: Colors.cyanAccent))
@@ -390,11 +341,59 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
   Widget _buildGlassCard(Installment it) {
     final double total = it.amount ?? 0.0;
     final double paid = it.paidAmount ?? 0.0;
-    final bool isPaid = (total - paid) <= 0;
-    final bool isOverdue = !isPaid && it.dueDate != null && it.dueDate!.isBefore(DateTime.now());
 
-    Color statusColor = isPaid ? Colors.greenAccent : (isOverdue ? Colors.redAccent : Colors.orangeAccent);
-    String statusText = isPaid ? "PAID" : (isOverdue ? "OVERDUE" : "PENDING");
+    // 🔥 1. STATUS FLAGS
+    final String statusStr = (it.status ?? '').toUpperCase();
+    final bool isSkipped = statusStr == 'SKIPPED';
+    final bool isCancelled = statusStr == 'CANCELLED'; // Player Left
+    final bool isPaid = !isSkipped && !isCancelled && ((total - paid) <= 0 || statusStr == 'PAID');
+    final bool isOverdue = !isSkipped && !isCancelled && !isPaid && it.dueDate != null && it.dueDate!.isBefore(DateTime.now());
+
+    // 🔥 2. DYNAMIC COLORS
+    Color cardBgColor;
+    Color textColor;
+    Color subTextColor;
+    String statusLabel;
+    Color statusChipColor;
+
+    if (isSkipped) {
+      // 🏖️ HOLIDAY (White Box)
+      cardBgColor = Colors.white.withOpacity(0.95);
+      textColor = Colors.black;
+      subTextColor = Colors.black54;
+      statusLabel = "HOLIDAY";
+      statusChipColor = Colors.blueGrey;
+    } else if (isCancelled) {
+      // ⛔ LEFT (Grey Box)
+      cardBgColor = Colors.grey.shade400;
+      textColor = Colors.black;
+      subTextColor = Colors.black87;
+      statusLabel = "LEFT";
+      statusChipColor = Colors.black;
+    } else {
+      // 🟢 NORMAL (Glass Dark)
+      cardBgColor = Colors.white.withOpacity(0.05);
+      textColor = Colors.white;
+      subTextColor = Colors.white54;
+      statusLabel = isPaid ? "PAID" : (isOverdue ? "OVERDUE" : "PENDING");
+      statusChipColor = isPaid ? Colors.greenAccent : (isOverdue ? Colors.redAccent : Colors.orangeAccent);
+    }
+
+    // --- BILL PERIOD LOGIC ---
+    int cycle = widget.player.paymentCycleMonths ?? 1;
+    DateTime endDate = DateTime(it.periodYear ?? DateTime.now().year, it.periodMonth ?? 1);
+    DateTime startDate = DateTime(endDate.year, endDate.month - cycle + 1);
+
+    String titleText;
+    if (cycle > 1) {
+      if (startDate.year != endDate.year) {
+        titleText = '${DateFormat('MMM yy').format(startDate)} - ${DateFormat('MMM yy').format(endDate)}';
+      } else {
+        titleText = '${DateFormat('MMM').format(startDate)} - ${DateFormat('MMM').format(endDate)} ${it.periodYear}';
+      }
+    } else {
+      titleText = '${DateFormat('MMM').format(endDate)} ${it.periodYear}';
+    }
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -404,7 +403,7 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
           filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
           child: Container(
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.05),
+              color: cardBgColor, // 🔥 Dynamic Background
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: Colors.white.withOpacity(0.1)),
             ),
@@ -412,90 +411,108 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // --- HEADER ROW ---
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      '${DateFormat('MMM').format(DateTime(0, it.periodMonth ?? 1))} ${it.periodYear}',
-                      style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                      titleText,
+                      style: TextStyle(color: textColor, fontSize: 18, fontWeight: FontWeight.bold),
                     ),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(color: statusColor.withOpacity(0.2), borderRadius: BorderRadius.circular(8), border: Border.all(color: statusColor)),
-                      child: Text(statusText, style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.bold)),
+                      decoration: BoxDecoration(
+                          color: isSkipped || isCancelled ? Colors.transparent : statusChipColor.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: statusChipColor)
+                      ),
+                      child: Text(statusLabel, style: TextStyle(color: statusChipColor, fontSize: 10, fontWeight: FontWeight.bold)),
                     )
                   ],
                 ),
                 const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    _infoCol("Amount", "₹${total.toInt()}", Colors.white),
-                    _infoCol("Paid", "₹${paid.toInt()}", Colors.greenAccent),
 
-                    // 🔥 UPDATED DUE DATE COLUMN (Clickable)
-                    InkWell(
-                      onTap: isPaid ? null : () => _extendDueDate(it),
-                      borderRadius: BorderRadius.circular(8),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Text("Due Date", style: TextStyle(color: Colors.white54, fontSize: 11)),
-                                if (!isPaid) const SizedBox(width: 4),
-                                if (!isPaid) const Icon(Icons.edit_calendar, color: Colors.cyanAccent, size: 12),
-                              ],
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              it.dueDate != null ? df.format(it.dueDate!) : "-",
-                              style: TextStyle(
-                                color: isOverdue ? Colors.redAccent : Colors.white70,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                                decoration: !isPaid ? TextDecoration.underline : TextDecoration.none,
-                                decorationColor: Colors.cyanAccent,
-                                decorationStyle: TextDecorationStyle.dashed,
-                              ),
-                            ),
-                          ],
+                // --- MIDDLE CONTENT ---
+                if (isSkipped || isCancelled)
+                // 🔥 CASE A: Holiday/Left -> Show Note Box
+                  Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(top: 8),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                        color: isSkipped ? Colors.blue.withOpacity(0.1) : Colors.red.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: isSkipped ? Colors.blue.withOpacity(0.3) : Colors.red.withOpacity(0.3))
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                            isSkipped ? "🏖️ Holiday Reason:" : "⛔ Leaving Reason:",
+                            style: TextStyle(fontSize: 11, color: subTextColor, fontWeight: FontWeight.bold)
                         ),
-                      ),
+                        const SizedBox(height: 4),
+                        Text(
+                            it.notes != null && it.notes!.isNotEmpty ? it.notes! : "No reason provided",
+                            style: TextStyle(color: textColor, fontWeight: FontWeight.w600, fontSize: 14)
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PaymentsListScreen(installmentId: it.id, remainingAmount: total - paid))),
-                        style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.white24), foregroundColor: Colors.white),
-                        child: const Text("History"),
+                  )
+                else
+                // 🔥 CASE B: Normal Bill -> Show Amount Rows
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _infoCol("Amount", "₹${total.toInt()}", textColor, subTextColor),
+                      _infoCol("Paid", "₹${paid.toInt()}", isPaid ? Colors.green : textColor, subTextColor),
+                      _infoCol(
+                          isPaid ? "Status" : "Due Date",
+                          isPaid ? "Paid" : (it.dueDate != null ? df.format(it.dueDate!) : "-"),
+                          isPaid ? Colors.green : (isOverdue ? Colors.redAccent : subTextColor),
+                          subTextColor
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    if (!isPaid)
+                    ],
+                  ),
+
+                // --- FOOTER BUTTONS ---
+                // (Skip/Cancel asel tar 'Record' dakhvu naka)
+                if (!isSkipped && !isCancelled) ...[
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
                       Expanded(
-                        child: ElevatedButton(
-                          onPressed: () async {
-                            final res = await Navigator.push(context, MaterialPageRoute(builder: (_) => RecordPaymentScreen(installmentId: it.id, remainingAmount: total - paid)));
-                            if (res == true) {
-                              // 🔥 REFRESH LOGIC
-                              DataManager().invalidatePlayerDetails(widget.player.id);
-                              _loadData(useCache: false); // Force Refresh
-                            }
-                          },
-                          style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurpleAccent, foregroundColor: Colors.white),
-                          child: const Text("Record"),
+                        child: OutlinedButton(
+                          // History Button (Always Visible)
+                          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PaymentsListScreen(installmentId: it.id, remainingAmount: total - paid))),
+                          style: OutlinedButton.styleFrom(side: BorderSide(color: subTextColor.withOpacity(0.3)), foregroundColor: textColor),
+                          child: const Text("History"),
                         ),
-                      )
-                  ],
-                )
+                      ),
+                      const SizedBox(width: 12),
+
+                      if (!isPaid)
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () async {
+                              final res = await Navigator.push(context, MaterialPageRoute(builder: (_) => RecordPaymentScreen(installmentId: it.id, remainingAmount: total - paid)));
+                              if (res == true) {
+                                DataManager().invalidatePlayerDetails(widget.player.id);
+                                _loadData(useCache: false);
+                              }
+                            },
+                            style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurpleAccent, foregroundColor: Colors.white),
+                            child: const Text("Record"),
+                          ),
+                        )
+                      else
+                        const Expanded(child: SizedBox())
+                    ],
+                  )
+                ] else ...[
+                  // Optional: Just a small spacer if skipped
+                  const SizedBox(height: 8),
+                ]
               ],
             ),
           ),
@@ -504,11 +521,11 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
     );
   }
 
-  Widget _infoCol(String label, String value, Color valColor) {
+  Widget _infoCol(String label, String value, Color valColor, Color labelColor) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(color: Colors.white54, fontSize: 11)),
+        Text(label, style: TextStyle(color: labelColor, fontSize: 11)),
         const SizedBox(height: 2),
         Text(value, style: TextStyle(color: valColor, fontWeight: FontWeight.bold, fontSize: 14)),
       ],

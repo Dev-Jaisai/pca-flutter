@@ -1,5 +1,6 @@
 // lib/services/api_service.dart
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -121,21 +122,37 @@ class ApiService {
           'Failed to load groups: ${response.statusCode} - ${response.body}');
     }
   }
+  static Future<void> createGroup({required String name, required double fee}) async {
+    // ❌ OLD (Wrong):
+    // Uri.parse('$baseUrl/groups'),
 
-  static Future<Group> createGroup({required String name}) async {
-    final url = Uri.parse('$baseUrl/api/groups');
-    final body = {'name': name};
+    // ✅ NEW (Correct): Add '/api' before '/groups'
     final response = await http.post(
-      url,
+      Uri.parse('$baseUrl/api/groups'),
       headers: {'Content-Type': 'application/json'},
-      body: json.encode(body),
+      body: jsonEncode({
+        'name': name,
+        'monthlyFee': fee,
+      }),
     );
 
-    if (response.statusCode == 200 || response.statusCode == 201) {
-      return Group.fromJson(json.decode(response.body));
-    } else {
-      throw Exception(
-          'Failed to create group: ${response.statusCode} - ${response.body}');
+    if (response.statusCode != 200) {
+      throw Exception('Failed to create group: ${response.body}');
+    }
+  }
+
+  static Future<void> updateGroup(int id, String name, double fee) async {
+    final response = await http.put(
+      Uri.parse('$baseUrl/api/groups/$id'), // '/api' विसरू नका
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'name': name,
+        'monthlyFee': fee,
+      }),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to update group: ${response.body}');
     }
   }
 
@@ -367,16 +384,66 @@ class ApiService {
           'Failed to create installment: ${response.statusCode} - ${response.body}');
     }
   }
-  // --- OPTIMIZED FETCH ---
+  // // --- OPTIMIZED FETCH ---
+  // static Future<List<PlayerInstallmentSummary>> fetchAllInstallmentsSummary({int page = 0, int size = 2000}) async {
+  //   final url = Uri.parse('$baseUrl/api/installments/all-summary?page=$page&size=$size');
+  //   final response = await http.get(url);
+  //
+  //   if (response.statusCode == 200) {
+  //     // Pass the raw string to background thread
+  //     return compute(_parseInstallmentsResponse, response.body);
+  //   } else {
+  //     throw Exception('Failed to load installments: ${response.statusCode}');
+  //   }
+
+// ApiService.dart मध्ये
   static Future<List<PlayerInstallmentSummary>> fetchAllInstallmentsSummary({int page = 0, int size = 2000}) async {
     final url = Uri.parse('$baseUrl/api/installments/all-summary?page=$page&size=$size');
     final response = await http.get(url);
 
+    // Debug print
     if (response.statusCode == 200) {
-      // Pass the raw string to background thread
+      final jsonData = jsonDecode(response.body);
+      print("📊 Sample item from API:");
+      if (jsonData['content'] != null && jsonData['content'].length > 0) {
+        final sample = jsonData['content'][0];
+        print("Player: ${sample['playerName']}");
+        print("Status: ${sample['status']}");
+        print("Last Payment Date: ${sample['lastPaymentDate']}");
+        print("Due Date: ${sample['dueDate']}");
+        print("Total Paid: ${sample['totalPaid']}");
+      }
+    }
+
+    if (response.statusCode == 200) {
       return compute(_parseInstallmentsResponse, response.body);
     } else {
       throw Exception('Failed to load installments: ${response.statusCode}');
+    }
+  }
+
+  static Future<void> pausePlayer(int playerId, DateTime date, String reason) async {
+    final dateStr = date.toIso8601String().split('T')[0];
+    // URL: /api/player-lifecycle/{id}/pause?date=...&reason=...
+    final url = Uri.parse('$baseUrl/api/player-lifecycle/$playerId/pause?date=$dateStr&reason=$reason');
+
+    final response = await http.post(url);
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to pause player: ${response.body}');
+    }
+  }
+
+  // ▶️ ACTIVATE PLAYER (Return)
+  static Future<void> activatePlayer(int playerId, DateTime date) async {
+    final dateStr = date.toIso8601String().split('T')[0];
+    // URL: /api/player-lifecycle/{id}/activate?date=...
+    final url = Uri.parse('$baseUrl/api/player-lifecycle/$playerId/activate?date=$dateStr');
+
+    final response = await http.post(url);
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to activate player: ${response.body}');
     }
   }
   // Standalone parser

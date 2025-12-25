@@ -44,10 +44,12 @@ class _RecordPaymentScreenState extends State<RecordPaymentScreen> {
         reference: ref,
       );
 
+      // Event Fire kara (Global refresh sathi)
       EventBus().fire(PlayerEvent('payment_recorded'));
       EventBus().fire(PlayerEvent('installment_updated'));
 
       if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Payment recorded successfully'),
@@ -55,9 +57,10 @@ class _RecordPaymentScreenState extends State<RecordPaymentScreen> {
           )
       );
 
-      Navigator.of(context).popUntil((route) {
-        return route.settings.name == '/all-installments' || route.isFirst;
-      });
+      // 🔥🔥🔥 IMP CHANGE IS HERE 🔥🔥🔥
+      // Juna code 'popUntil' waparat hota, tyamule magchya screen la signal bhetat navhta.
+      // Aata apan 'true' return kartoy.
+      Navigator.pop(context, true);
 
     } catch (e) {
       if (mounted) {

@@ -1,75 +1,90 @@
-// lib/models/installment.dart
 class Installment {
-  final int id; // used throughout UI
-  final int? installmentId; // also map if backend uses this name
+  final int id;
+  final int? playerId;
   final int? periodMonth;
   final int? periodYear;
   final double? amount;
   final double? paidAmount;
-  final double? remainingAmount;
   final String? status;
   final DateTime? dueDate;
+  final String? notes;
 
   Installment({
     required this.id,
-    this.installmentId,
+    this.playerId,
     this.periodMonth,
     this.periodYear,
     this.amount,
     this.paidAmount,
-    this.remainingAmount,
     this.status,
     this.dueDate,
+    this.notes,
   });
 
   factory Installment.fromJson(Map<String, dynamic> json) {
-    // backend might return "installmentId" (DTO) or "id" depending on endpoint
-    int idVal = 0;
+    // 1. Safe ID Parsing (Crucial Fix)
+    // Jar ID null aala, tar 0 ghyaycha (Crash honar nahi)
+    int safeId = 0;
     if (json['id'] != null) {
-      idVal = (json['id'] is int) ? json['id'] as int : int.tryParse(json['id'].toString()) ?? 0;
-    } else if (json['installmentId'] != null) {
-      idVal = (json['installmentId'] is int) ? json['installmentId'] as int : int.tryParse(json['installmentId'].toString()) ?? 0;
-    }
-
-    DateTime? due;
-    final dueRaw = json['dueDate'] ?? json['due_date'];
-    if (dueRaw != null) {
-      try {
-        due = DateTime.parse(dueRaw.toString());
-      } catch (_) {
-        due = null;
+      if (json['id'] is int) {
+        safeId = json['id'];
+      } else if (json['id'] is String) {
+        safeId = int.tryParse(json['id']) ?? 0;
       }
     }
 
-    double? parseDouble(dynamic v) {
-      if (v == null) return null;
-      if (v is double) return v;
-      if (v is int) return v.toDouble();
-      return double.tryParse(v.toString());
+    // 2. Safe Player ID Parsing (Handle nested object or flat field)
+    int? pId;
+    if (json['playerId'] != null) {
+      pId = json['playerId'] is int ? json['playerId'] : int.tryParse(json['playerId'].toString());
+    } else if (json['player'] != null && json['player'] is Map) {
+      // Jar backend ne 'Player' object pathavla asel
+      var pObj = json['player'];
+      if (pObj['id'] != null) {
+        pId = pObj['id'] is int ? pObj['id'] : int.tryParse(pObj['id'].toString());
+      }
+    }
+
+    // 3. Date Parsing
+    DateTime? parsedDate;
+    if (json['dueDate'] != null) {
+      try {
+        parsedDate = DateTime.parse(json['dueDate']);
+      } catch (e) {
+        parsedDate = null;
+      }
+    }
+
+    // 4. Double Parsing Helper
+    double? parseDouble(dynamic val) {
+      if (val == null) return 0.0;
+      if (val is int) return val.toDouble();
+      if (val is double) return val;
+      return double.tryParse(val.toString()) ?? 0.0;
     }
 
     return Installment(
-      id: idVal,
-      installmentId: json['installmentId'] is int ? json['installmentId'] as int : (json['installmentId'] != null ? int.tryParse(json['installmentId'].toString()) : null),
-      periodMonth: json['periodMonth'] is int ? json['periodMonth'] as int : (json['periodMonth'] != null ? int.tryParse(json['periodMonth'].toString()) : null),
-      periodYear: json['periodYear'] is int ? json['periodYear'] as int : (json['periodYear'] != null ? int.tryParse(json['periodYear'].toString()) : null),
+      id: safeId, // 🔥 Fixed: Never Null
+      playerId: pId,
+      periodMonth: json['periodMonth'] is int ? json['periodMonth'] : int.tryParse(json['periodMonth']?.toString() ?? ''),
+      periodYear: json['periodYear'] is int ? json['periodYear'] : int.tryParse(json['periodYear']?.toString() ?? ''),
       amount: parseDouble(json['amount']),
       paidAmount: parseDouble(json['paidAmount']),
-      remainingAmount: parseDouble(json['remainingAmount']),
-      status: json['status']?.toString(),
-      dueDate: due,
+      status: json['status'],
+      dueDate: parsedDate,
+      notes: json['notes'],
     );
   }
 
   Map<String, dynamic> toJson() => {
     'id': id,
-    'installmentId': installmentId,
+    'playerId': playerId,
     'periodMonth': periodMonth,
     'periodYear': periodYear,
     'amount': amount,
     'paidAmount': paidAmount,
-    'remainingAmount': remainingAmount,
     'status': status,
     'dueDate': dueDate?.toIso8601String(),
+    'notes': notes,
   };
 }

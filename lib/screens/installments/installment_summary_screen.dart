@@ -10,10 +10,15 @@ class InstallmentSummaryScreen extends StatefulWidget {
   final String? initialMonth;
   final String? initialFilter;
 
-  const InstallmentSummaryScreen({super.key, this.initialMonth, this.initialFilter});
+  const InstallmentSummaryScreen({
+    super.key,
+    this.initialMonth,
+    this.initialFilter
+  });
 
   @override
-  State<InstallmentSummaryScreen> createState() => _InstallmentSummaryScreenState();
+  State<InstallmentSummaryScreen> createState() =>
+      _InstallmentSummaryScreenState();
 }
 
 class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
@@ -22,6 +27,8 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
   bool _loading = true;
   String? _error;
   List<PlayerInstallmentSummary> _items = [];
+
+  Map<int, Player> _playerMap = {};
 
   // Stats Variables
   double _totalAmount = 0;
@@ -36,28 +43,37 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
       _selectedMonth = widget.initialMonth!;
     } else {
       final now = DateTime.now();
-      _selectedMonth = '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}';
+      _selectedMonth = '${now.year.toString().padLeft(4, '0')}-'
+          '${now.month.toString().padLeft(2, '0')}';
     }
     _filter = widget.initialFilter ?? 'all';
     _load();
   }
 
   Future<void> _load() async {
-    final cachedData = await DataManager().getCachedAllInstallments();
-    if (cachedData != null && cachedData.isNotEmpty) {
-      if (mounted) {
-        setState(() {
-          _processAndDisplay(cachedData);
-          _loading = false;
-        });
-      }
-    } else {
-      if (mounted) setState(() => _loading = true);
-    }
+    setState(() => _loading = true);
 
     try {
-      final freshList = await ApiService.fetchAllInstallmentsSummary(page: 0, size: 5000);
+      // 1. Fetch Players First (To get Billing Day)
+      final players = await DataManager().getPlayers();
+      if (mounted) {
+        setState(() {
+          _playerMap = {for (var p in players) p.id: p};
+        });
+      }
+
+      // 2. Fetch Installments Data
+      final cachedData = await DataManager().getCachedAllInstallments();
+      if (cachedData != null && cachedData.isNotEmpty) {
+        _processAndDisplay(cachedData);
+      }
+
+      final freshList = await ApiService.fetchAllInstallmentsSummary(
+          page: 0,
+          size: 5000
+      );
       await DataManager().saveAllInstallments(freshList);
+
       if (mounted) {
         setState(() {
           _processAndDisplay(freshList);
@@ -66,10 +82,10 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
         });
       }
     } catch (e) {
-      if (mounted && _items.isEmpty) {
+      if (mounted) {
         setState(() {
           _loading = false;
-          _error = e.toString();
+          if (_items.isEmpty) _error = e.toString();
         });
       }
     }
@@ -82,9 +98,12 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
     final selYear = int.parse(parts[0]);
     final selMonth = int.parse(parts[1]);
 
+    // 🔥 KEY FIX: Filter by Due Date month (not period month)
+    // Example: December 2025 select केला तर dueDate.month == 12 असलेले bills दाखवा
     filteredList = allData.where((item) {
       if (item.dueDate != null) {
-        return item.dueDate!.year == selYear && item.dueDate!.month == selMonth;
+        return item.dueDate!.year == selYear &&
+            item.dueDate!.month == selMonth;
       }
       return false;
     }).toList();
@@ -118,9 +137,18 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-              backgroundColor: const Color(0xFF203A43), // Dark Dialog
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: BorderSide(color: Colors.white.withOpacity(0.1))),
-              title: const Text("Select Month", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+              backgroundColor: const Color(0xFF203A43),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                  side: BorderSide(color: Colors.white.withOpacity(0.1))
+              ),
+              title: const Text(
+                  "Select Month",
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white
+                  )
+              ),
               content: Row(
                 children: [
                   Expanded(
@@ -129,8 +157,16 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
                       dropdownColor: const Color(0xFF2C5364),
                       style: const TextStyle(color: Colors.white),
                       decoration: InputDecoration(
-                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.white.withOpacity(0.3))),
-                        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.cyanAccent)),
+                        enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                                color: Colors.white.withOpacity(0.3)
+                            )
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: Colors.cyanAccent)
+                        ),
                         contentPadding: const EdgeInsets.symmetric(horizontal: 10),
                       ),
                       items: List.generate(12, (index) {
@@ -138,7 +174,9 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
                         final name = DateFormat.MMM().format(DateTime(2024, m));
                         return DropdownMenuItem(value: m, child: Text(name));
                       }),
-                      onChanged: (val) { if (val != null) setDialogState(() => tempMonth = val); },
+                      onChanged: (val) {
+                        if (val != null) setDialogState(() => tempMonth = val);
+                      },
                     ),
                   ),
                   const SizedBox(width: 16),
@@ -148,15 +186,25 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
                       dropdownColor: const Color(0xFF2C5364),
                       style: const TextStyle(color: Colors.white),
                       decoration: InputDecoration(
-                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.white.withOpacity(0.3))),
-                        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.cyanAccent)),
+                        enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                                color: Colors.white.withOpacity(0.3)
+                            )
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: Colors.cyanAccent)
+                        ),
                         contentPadding: const EdgeInsets.symmetric(horizontal: 10),
                       ),
                       items: List.generate(5, (index) {
                         final y = now.year - 2 + index;
                         return DropdownMenuItem(value: y, child: Text(y.toString()));
                       }),
-                      onChanged: (val) { if (val != null) setDialogState(() => tempYear = val); },
+                      onChanged: (val) {
+                        if (val != null) setDialogState(() => tempYear = val);
+                      },
                     ),
                   ),
                 ],
@@ -164,7 +212,10 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: Text("Cancel", style: TextStyle(color: Colors.white.withOpacity(0.6))),
+                  child: Text(
+                      "Cancel",
+                      style: TextStyle(color: Colors.white.withOpacity(0.6))
+                  ),
                 ),
                 ElevatedButton(
                   onPressed: () {
@@ -176,9 +227,14 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
                   style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.cyanAccent,
                       foregroundColor: Colors.black,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)
+                      )
                   ),
-                  child: const Text("Select", style: TextStyle(fontWeight: FontWeight.bold)),
+                  child: const Text(
+                      "Select",
+                      style: TextStyle(fontWeight: FontWeight.bold)
+                  ),
                 ),
               ],
             );
@@ -196,11 +252,15 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
       margin: const EdgeInsets.all(16),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.08), // Glass Effect
+        color: Colors.white.withOpacity(0.08),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: Colors.white.withOpacity(0.1)),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 15, offset: const Offset(0, 5)),
+          BoxShadow(
+              color: Colors.black.withOpacity(0.2),
+              blurRadius: 15,
+              offset: const Offset(0, 5)
+          ),
         ],
       ),
       child: Column(
@@ -210,14 +270,26 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
             children: [
               Text(
                 monthName.toUpperCase(),
-                style: const TextStyle(color: Colors.cyanAccent, fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+                style: const TextStyle(
+                    color: Colors.cyanAccent,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.2
+                ),
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(10)),
+                decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(10)
+                ),
                 child: Text(
                   "Count: $_totalCount",
-                  style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 12, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                      color: Colors.white.withOpacity(0.8),
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold
+                  ),
                 ),
               )
             ],
@@ -226,9 +298,24 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _buildSummaryItem(Icons.monetization_on, "Target", _totalAmount, Colors.blueAccent),
-              _buildSummaryItem(Icons.check_circle, "Collected", _totalPaid, Colors.greenAccent),
-              _buildSummaryItem(Icons.pending, "Pending", _totalRemaining, Colors.orangeAccent),
+              _buildSummaryItem(
+                  Icons.monetization_on,
+                  "Target",
+                  _totalAmount,
+                  Colors.blueAccent
+              ),
+              _buildSummaryItem(
+                  Icons.check_circle,
+                  "Collected",
+                  _totalPaid,
+                  Colors.greenAccent
+              ),
+              _buildSummaryItem(
+                  Icons.pending,
+                  "Pending",
+                  _totalRemaining,
+                  Colors.orangeAccent
+              ),
             ],
           ),
         ],
@@ -236,16 +323,31 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
     );
   }
 
-  Widget _buildSummaryItem(IconData icon, String label, double amount, Color color) {
+  Widget _buildSummaryItem(
+      IconData icon,
+      String label,
+      double amount,
+      Color color
+      ) {
     return Column(
       children: [
         Icon(icon, color: color.withOpacity(0.8), size: 22),
         const SizedBox(height: 6),
-        Text(label, style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 11)),
+        Text(
+            label,
+            style: TextStyle(
+                color: Colors.white.withOpacity(0.6),
+                fontSize: 11
+            )
+        ),
         const SizedBox(height: 4),
         Text(
           "₹${amount >= 1000 ? (amount / 1000).toStringAsFixed(1) + 'k' : amount.toInt()}",
-          style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+          style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.bold
+          ),
         ),
       ],
     );
@@ -256,25 +358,38 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const Text('Monthly Summary', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+        title: const Text(
+            'Monthly Summary',
+            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)
+        ),
         centerTitle: true,
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
           icon: Container(
             padding: const EdgeInsets.all(8),
-            decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.black26),
-            child: const Icon(Icons.arrow_back_ios_new, size: 18, color: Colors.white),
+            decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.black26
+            ),
+            child: const Icon(
+                Icons.arrow_back_ios_new,
+                size: 18,
+                color: Colors.white
+            ),
           ),
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
-          IconButton(icon: const Icon(Icons.refresh, color: Colors.white), onPressed: _load),
+          IconButton(
+              icon: const Icon(Icons.refresh, color: Colors.white),
+              onPressed: _load
+          ),
         ],
       ),
       body: Stack(
         children: [
-          // 1. BACKGROUND
+          // Background
           Container(
             decoration: const BoxDecoration(
               gradient: LinearGradient(
@@ -283,25 +398,39 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
                 colors: [
                   Color(0xFF0F2027),
                   Color(0xFF203A43),
-                  Color(0xFF2C5364),
+                  Color(0xFF2C5364)
                 ],
               ),
             ),
           ),
 
-          // 2. ORBS
+          // Orbs
           Positioned(
-            top: -60, left: -60,
+            top: -60,
+            left: -60,
             child: Container(
-              height: 220, width: 220,
-              decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.cyan.withOpacity(0.15), boxShadow: [BoxShadow(color: Colors.cyan.withOpacity(0.2), blurRadius: 90, spreadRadius: 40)]),
+              height: 220,
+              width: 220,
+              decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.cyan.withOpacity(0.15),
+                  boxShadow: [
+                    BoxShadow(
+                        color: Colors.cyan.withOpacity(0.2),
+                        blurRadius: 90,
+                        spreadRadius: 40
+                    )
+                  ]
+              ),
             ),
           ),
 
-          // 3. CONTENT
+          // Content
           SafeArea(
             child: _loading
-                ? const Center(child: CircularProgressIndicator(color: Colors.cyanAccent))
+                ? const Center(
+                child: CircularProgressIndicator(color: Colors.cyanAccent)
+            )
                 : Column(
               children: [
                 _buildSummaryHeader(),
@@ -312,9 +441,18 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.calendar_view_month, size: 60, color: Colors.white.withOpacity(0.2)),
+                        Icon(
+                            Icons.calendar_view_month,
+                            size: 60,
+                            color: Colors.white.withOpacity(0.2)
+                        ),
                         const SizedBox(height: 16),
-                        Text("No records found for this month", style: TextStyle(color: Colors.white.withOpacity(0.5))),
+                        Text(
+                            "No records found for this month",
+                            style: TextStyle(
+                                color: Colors.white.withOpacity(0.5)
+                            )
+                        ),
                       ],
                     ),
                   )
@@ -327,15 +465,27 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
                       itemCount: _items.length,
                       itemBuilder: (ctx, i) {
                         final item = _items[i];
+
+                        // Get Billing Day from Player Map
+                        int? billingDay;
+                        if (_playerMap.containsKey(item.playerId)) {
+                          billingDay = _playerMap[item.playerId]!
+                              .billingDay;
+                        }
+
                         final player = Player(
-                            id: item.playerId ?? 0,
+                            id: item.playerId,
                             name: item.playerName,
                             group: item.groupName ?? '',
-                            phone: item.phone ?? ''
+                            phone: item.phone ?? '',
+                            paymentCycleMonths: item.paymentCycleMonths,
+                            billingDay: billingDay
                         );
 
                         return Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16
+                          ),
                           child: PlayerSummaryCard(
                             player: player,
                             summary: item,
@@ -354,7 +504,10 @@ class _InstallmentSummaryScreenState extends State<InstallmentSummaryScreen> {
 
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _pickMonth,
-        label: const Text("Change Month", style: TextStyle(fontWeight: FontWeight.bold)),
+        label: const Text(
+            "Change Month",
+            style: TextStyle(fontWeight: FontWeight.bold)
+        ),
         icon: const Icon(Icons.calendar_month),
         backgroundColor: Colors.cyanAccent,
         foregroundColor: Colors.black,

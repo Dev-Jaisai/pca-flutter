@@ -4,8 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../models/player_installment_summary.dart';
 import '../screens/home/home_screen.dart';
-import '../screens/installments/OverduePlayersScreen.dart';
-import '../screens/installments/all_installments_screen.dart';
+import '../screens/installments/universal_list_screen.dart'; // ✅ Use Universal Screen
 import '../services/api_service.dart';
 import '../services/data_manager.dart';
 import '../utils/event_bus.dart';
@@ -37,6 +36,7 @@ class DashboardStatsState extends State<DashboardStats> with TickerProviderState
     _numAnim = CurvedAnimation(parent: _numAnimController, curve: Curves.easeOut);
     _loadFromCache();
     _loadStats();
+
     _playerEventsSubscription = EventBus().stream.listen((event) {
       if (['added', 'deleted', 'updated', 'installment_created', 'installment_deleted', 'payment_recorded', 'installment_updated', 'overdue_paid'].contains(event.action)) {
         _loadStats();
@@ -56,7 +56,14 @@ class DashboardStatsState extends State<DashboardStats> with TickerProviderState
     final cachedPlayers = DataManager().getCachedData().players;
     if (cachedInstallments != null && cachedInstallments.isNotEmpty) {
       final stats = await compute(_calculateStats, cachedInstallments);
-      if (mounted) setState(() { _totalPlayers = cachedPlayers?.length ?? 0; _currentMonthDue = stats['due']!; _upcomingCount = stats['upcoming']!; _overduePlayers = stats['overduePlayers']!; _overdueAmount = stats['overdueAmount']!; _loading = false; });
+      if (mounted) setState(() {
+        _totalPlayers = cachedPlayers?.length ?? 0;
+        _currentMonthDue = stats['due']!;
+        _upcomingCount = stats['upcoming']!;
+        _overduePlayers = stats['overduePlayers']!;
+        _overdueAmount = stats['overdueAmount']!;
+        _loading = false;
+      });
       _animateValues();
     }
   }
@@ -68,7 +75,14 @@ class DashboardStatsState extends State<DashboardStats> with TickerProviderState
       final players = results[1] as List<dynamic>;
       await DataManager().saveAllInstallments(allRows);
       final stats = await compute(_calculateStats, allRows);
-      if (mounted) setState(() { _totalPlayers = players.length; _currentMonthDue = stats['due']!; _upcomingCount = stats['upcoming']!; _overduePlayers = stats['overduePlayers']!; _overdueAmount = stats['overdueAmount']!; _loading = false; });
+      if (mounted) setState(() {
+        _totalPlayers = players.length;
+        _currentMonthDue = stats['due']!;
+        _upcomingCount = stats['upcoming']!;
+        _overduePlayers = stats['overduePlayers']!;
+        _overdueAmount = stats['overdueAmount']!;
+        _loading = false;
+      });
       _animateValues();
     } catch (e) {
       if (mounted && _totalPlayers == 0) setState(() => _loading = false);
@@ -84,7 +98,12 @@ class DashboardStatsState extends State<DashboardStats> with TickerProviderState
 
     for (var r in rows) {
       if (r.playerId == null || r.dueDate == null) continue;
-      bool isPaid = (r.status ?? '').toUpperCase() == 'PAID';
+
+      final status = (r.status ?? '').toUpperCase();
+      // Skip stats for Holiday/Left players
+      if (status == 'SKIPPED' || status == 'CANCELLED') continue;
+
+      bool isPaid = status == 'PAID';
 
       if (r.dueDate!.isBefore(startOfToday) && !isPaid) {
         overdue.add(r.playerId!);
@@ -105,24 +124,64 @@ class DashboardStatsState extends State<DashboardStats> with TickerProviderState
 
     final configs = [
       {
-        'title': 'Total Players', 'value': _totalPlayers, 'amount': null, 'icon': Icons.people,
-        'gradient': [Colors.blueAccent.withOpacity(0.6), Colors.blue.withOpacity(0.3)], 'color': Colors.blueAccent,
+        'title': 'Total Players',
+        'value': _totalPlayers,
+        'amount': null,
+        'icon': Icons.people,
+        'gradient': [Colors.blueAccent.withOpacity(0.6), Colors.blue.withOpacity(0.3)],
+        'color': Colors.blueAccent,
         'onTap': () => Navigator.push(context, MaterialPageRoute(builder: (_) => const HomeScreen())),
       },
       {
-        'title': 'This Month Due', 'value': _currentMonthDue, 'amount': null, 'icon': Icons.calendar_month,
-        'gradient': [Colors.orangeAccent.withOpacity(0.6), Colors.deepOrange.withOpacity(0.3)], 'color': Colors.orangeAccent,
-        'onTap': () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AllInstallmentsScreen(initialFilter: 'Due (Month)'))),
+        'title': 'This Month Due',
+        'value': _currentMonthDue,
+        'amount': null,
+        'icon': Icons.calendar_month,
+        'gradient': [Colors.orangeAccent.withOpacity(0.6), Colors.deepOrange.withOpacity(0.3)],
+        'color': Colors.orangeAccent,
+        // 🔥 Navigates to Universal List (Monthly)
+        'onTap': () {
+          final currentMonthStr = "${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}";
+          Navigator.push(context, MaterialPageRoute(builder: (_) => UniversalListScreen(
+              title: "This Month's Dues",
+              filterType: "MONTHLY",
+              targetMonth: currentMonthStr
+          )));
+        },
       },
       {
-        'title': 'Upcoming', 'value': _upcomingCount, 'amount': null, 'icon': Icons.next_plan,
-        'gradient': [Colors.tealAccent.withOpacity(0.6), Colors.teal.withOpacity(0.3)], 'color': Colors.tealAccent,
-        'onTap': () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AllInstallmentsScreen(initialFilter: 'Upcoming'))),
+        'title': 'Upcoming',
+        'value': _upcomingCount,
+        'amount': null,
+        'icon': Icons.next_plan,
+        'gradient': [Colors.tealAccent.withOpacity(0.6), Colors.teal.withOpacity(0.3)],
+        'color': Colors.tealAccent,
+        // 🔥 Navigates to Universal List (Upcoming) -- Logic handled inside Universal List
+        // Note: For simplicity, you might want to implement UPCOMING filter in Universal List or just keep separate screen if complex logic needed.
+        // For now, let's assume Universal List handles it or we use old screen if preferred.
+        // Let's use Universal List with a 'MONTHLY' filter for next month as "Upcoming"
+        'onTap': () {
+          final nextMonth = DateTime.now().add(const Duration(days: 30));
+          final nextMonthStr = "${nextMonth.year}-${nextMonth.month.toString().padLeft(2, '0')}";
+          Navigator.push(context, MaterialPageRoute(builder: (_) => UniversalListScreen(
+              title: "Upcoming Dues",
+              filterType: "MONTHLY",
+              targetMonth: nextMonthStr
+          )));
+        },
       },
       {
-        'title': 'Overdue', 'value': _overduePlayers, 'amount': _overdueAmount, 'icon': Icons.warning_amber_rounded,
-        'gradient': [Colors.redAccent.withOpacity(0.6), Colors.red.withOpacity(0.3)], 'color': Colors.redAccent,
-        'onTap': _overduePlayers > 0 ? () => Navigator.push(context, MaterialPageRoute(builder: (_) => const OverduePlayersScreen())) : null,
+        'title': 'Overdue',
+        'value': _overduePlayers,
+        'amount': _overdueAmount,
+        'icon': Icons.warning_amber_rounded,
+        'gradient': [Colors.redAccent.withOpacity(0.6), Colors.red.withOpacity(0.3)],
+        'color': Colors.redAccent,
+        // 🔥 Navigates to Universal List (Overdue)
+        'onTap': _overduePlayers > 0 ? () => Navigator.push(context, MaterialPageRoute(builder: (_) => const UniversalListScreen(
+            title: "Overdue List",
+            filterType: "OVERDUE"
+        ))) : null,
       },
     ];
 

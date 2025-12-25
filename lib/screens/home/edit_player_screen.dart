@@ -15,15 +15,19 @@ class EditPlayerScreen extends StatefulWidget {
 
 class _EditPlayerScreenState extends State<EditPlayerScreen> {
   final _formKey = GlobalKey<FormState>();
+
+  // Controllers
   late TextEditingController _nameCtl;
   late TextEditingController _phoneCtl;
   late TextEditingController _ageCtl;
   late TextEditingController _notesCtl;
+
+  // State Variables
   DateTime? _joinDate;
   int? _selectedGroupId;
-
   int _paymentCycleMonths = 1;
   DateTime? _newBillingDate;
+  bool _isActive = true; // Local state to update UI immediately if needed
 
   List<Group> _groups = [];
   bool _loading = false;
@@ -31,26 +35,31 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
   @override
   void initState() {
     super.initState();
+    _initializeFields();
+    _fetchGroups();
+  }
+
+  void _initializeFields() {
     _nameCtl = TextEditingController(text: widget.player.name);
     _phoneCtl = TextEditingController(text: widget.player.phone);
     _ageCtl = TextEditingController(text: widget.player.age?.toString() ?? '');
     _notesCtl = TextEditingController(text: widget.player.notes);
     _joinDate = widget.player.joinDate;
     _selectedGroupId = widget.player.groupId;
-
-    // Initialize Cycle from existing player data
     _paymentCycleMonths = widget.player.paymentCycleMonths ?? 1;
-
-    _fetchGroups();
+    _isActive = widget.player.isActive;
   }
 
   Future<void> _fetchGroups() async {
     try {
       final groups = await ApiService.fetchGroups();
       if (mounted) setState(() => _groups = groups);
-    } catch (e) { debugPrint('Error: $e'); }
+    } catch (e) {
+      debugPrint('Error fetching groups: $e');
+    }
   }
 
+  // --- STANDARD UPDATE (Name, Phone, Group etc.) ---
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loading = true);
@@ -73,7 +82,7 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Updated successfully'), backgroundColor: Colors.green));
-        Navigator.pop(context, true);
+        Navigator.pop(context, true); // Return true to refresh parent
       }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red));
@@ -107,6 +116,142 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
           _newBillingDate = picked;
         }
       });
+    }
+  }
+
+  // --- 🔥 FEATURE 1: HOLIDAY / PAUSE DIALOG ---
+  void _showPauseDialog() {
+    final noteCtl = TextEditingController();
+    DateTime selectedDate = DateTime.now();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF203A43),
+          title: const Text("🏖️ Mark on Holiday", style: TextStyle(color: Colors.white)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                "Player will be marked INACTIVE. Future bills will NOT be generated automatically.",
+                style: TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+              const SizedBox(height: 16),
+
+              // Date Picker
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text("Start Date:", style: TextStyle(color: Colors.white)),
+                trailing: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(border: Border.all(color: Colors.cyanAccent), borderRadius: BorderRadius.circular(4)),
+                  child: Text(DateFormat('dd MMM yyyy').format(selectedDate), style: const TextStyle(color: Colors.cyanAccent)),
+                ),
+                onTap: () async {
+                  final picked = await showDatePicker(context: context, initialDate: selectedDate, firstDate: DateTime(2023), lastDate: DateTime(2030));
+                  if (picked != null) setDialogState(() => selectedDate = picked);
+                },
+              ),
+
+              // Reason Input
+              TextField(
+                controller: noteCtl,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: "Reason (e.g. Village Trip)",
+                  labelStyle: TextStyle(color: Colors.white54),
+                  enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                  focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.cyanAccent)),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel", style: TextStyle(color: Colors.white54))),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.orangeAccent, foregroundColor: Colors.black),
+              onPressed: () async {
+                Navigator.pop(ctx); // Close Dialog
+                _performLifecycleAction(
+                    actionName: "Pause",
+                    action: () => ApiService.pausePlayer(widget.player.id, selectedDate, noteCtl.text)
+                );
+              },
+              child: const Text("CONFIRM PAUSE"),
+            )
+          ],
+        ),
+      ),
+    );
+  }
+
+  // --- 🔥 FEATURE 2: ACTIVATE / RETURN DIALOG ---
+  void _showActivateDialog() {
+    DateTime selectedDate = DateTime.now();
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF203A43),
+          title: const Text("▶️ Welcome Back!", style: TextStyle(color: Colors.white)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                "Select the new Billing Start Date. A new cycle will begin from this date.",
+                style: TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+              const SizedBox(height: 16),
+
+              // Date Picker
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text("Start Date:", style: TextStyle(color: Colors.white)),
+                trailing: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(border: Border.all(color: Colors.greenAccent), borderRadius: BorderRadius.circular(4)),
+                  child: Text(DateFormat('dd MMM yyyy').format(selectedDate), style: const TextStyle(color: Colors.greenAccent)),
+                ),
+                onTap: () async {
+                  final picked = await showDatePicker(context: context, initialDate: selectedDate, firstDate: DateTime(2023), lastDate: DateTime(2030));
+                  if (picked != null) setDialogState(() => selectedDate = picked);
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel", style: TextStyle(color: Colors.white54))),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.greenAccent, foregroundColor: Colors.black),
+              onPressed: () async {
+                Navigator.pop(ctx); // Close Dialog
+                _performLifecycleAction(
+                    actionName: "Activate",
+                    action: () => ApiService.activatePlayer(widget.player.id, selectedDate)
+                );
+              },
+              child: const Text("ACTIVATE"),
+            )
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Helper to handle API calls for Lifecycle actions
+  Future<void> _performLifecycleAction({required String actionName, required Future<void> Function() action}) async {
+    setState(() => _loading = true);
+    try {
+      await action();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Player ${actionName}d Successfully!"), backgroundColor: Colors.green));
+        Navigator.pop(context, true); // Close Screen & Refresh Parent
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red));
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -166,13 +311,13 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
                           const SizedBox(height: 16),
                           _neonTextField(_ageCtl, 'Age', Icons.cake, type: TextInputType.number),
 
-                          // --- ✅ IMPROVED BILLING SECTION ---
+                          // --- BILLING SETTINGS ---
                           const SizedBox(height: 30),
                           const Divider(color: Colors.white24),
                           const Text("Billing Settings", style: TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold, fontSize: 16)),
                           const SizedBox(height: 15),
 
-                          // 🔥 INFO CARD (Current Status)
+                          // Current Info
                           Container(
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
@@ -199,7 +344,6 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
                           ),
                           const SizedBox(height: 20),
 
-                          // 1. Payment Cycle Dropdown (Edit)
                           DropdownButtonFormField<int>(
                             value: _paymentCycleMonths,
                             dropdownColor: const Color(0xFF2C5364),
@@ -213,7 +357,6 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
                           ),
                           const SizedBox(height: 16),
 
-                          // 2. Billing Day Picker (Edit)
                           GestureDetector(
                             onTap: () => _pickDate(false), // Billing Date
                             child: Container(
@@ -240,7 +383,47 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
                               ),
                             ),
                           ),
-                          // --- END BILLING SECTION ---
+
+                          // --- LIFECYCLE MANAGEMENT (FEATURE 1) ---
+                          const SizedBox(height: 30),
+                          const Divider(color: Colors.white24),
+                          const Text("Status & Lifecycle", style: TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.bold, fontSize: 16)),
+                          const SizedBox(height: 15),
+
+                          if (_isActive)
+                          // IF ACTIVE: SHOW PAUSE
+                            SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                icon: const Icon(Icons.beach_access, size: 20),
+                                label: const Text("MARK ON HOLIDAY / PAUSE"),
+                                style: OutlinedButton.styleFrom(
+                                    foregroundColor: Colors.orangeAccent,
+                                    side: const BorderSide(color: Colors.orangeAccent),
+                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))
+                                ),
+                                onPressed: _showPauseDialog,
+                              ),
+                            )
+                          else
+                          // IF INACTIVE: SHOW ACTIVATE
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton.icon(
+                                icon: const Icon(Icons.play_arrow, size: 20),
+                                label: const Text("ACTIVATE PLAYER (RESUME)"),
+                                style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.greenAccent,
+                                    foregroundColor: Colors.black,
+                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))
+                                ),
+                                onPressed: _showActivateDialog,
+                              ),
+                            ),
+
+                          // --- END LIFECYCLE SECTION ---
 
                           const SizedBox(height: 25),
                           const Divider(color: Colors.white24),
@@ -249,13 +432,14 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
                           _neonTextField(_notesCtl, 'Notes', Icons.note, maxLines: 2),
                           const SizedBox(height: 30),
 
+                          // MAIN SAVE BUTTON
                           Container(
                             width: double.infinity,
                             decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), gradient: const LinearGradient(colors: [Colors.purple, Colors.deepPurpleAccent])),
                             child: ElevatedButton(
                               onPressed: _submit,
                               style: ElevatedButton.styleFrom(backgroundColor: Colors.transparent, shadowColor: Colors.transparent, padding: const EdgeInsets.symmetric(vertical: 16)),
-                              child: const Text('UPDATE PLAYER', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                              child: const Text('UPDATE DETAILS', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                             ),
                           )
                         ],

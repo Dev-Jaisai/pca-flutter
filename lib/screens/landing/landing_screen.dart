@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 
 // Screens
+import '../groups/group_management_screen.dart';
 import '../home/add_player_screen.dart';
 import '../../widgets/dashboard_stats.dart';
 import '../installments/BulkExtendScreen.dart';
@@ -10,7 +11,6 @@ import '../installments/installment_summary_screen.dart';
 import '../reminders/sms_reminder_screen.dart';
 import '../installments/all_installments_screen.dart';
 import '../home/home_screen.dart';
-import '../groups/group_list_screen.dart';
 import '../fees/fee_list_screen.dart';
 
 // Search & Data Imports
@@ -144,9 +144,16 @@ class _LandingScreenState extends State<LandingScreen> {
                   const SizedBox(height: 12),
                   _buildGlassActionCard(icon: Icons.list_alt, label: 'All Installments History', color: Colors.tealAccent, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AllInstallmentsScreen()))),
                   const SizedBox(height: 12),
-                  _buildGlassActionCard(icon: Icons.group, label: 'Manage Groups', color: Colors.indigoAccent, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const GroupListScreen()))),
-                  const SizedBox(height: 12),
-                  _buildGlassActionCard(icon: Icons.monetization_on, label: 'Fee Structures', color: Colors.amberAccent, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FeeListScreen()))),
+                  _buildGlassActionCard(
+                      icon: Icons.settings_applications,
+                      label: 'Manage Groups & Fees',
+                      color: Colors.indigoAccent,
+                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const GroupManagementScreen()))
+                  ),
+
+                  // _buildGlassActionCard(icon: Icons.group, label: 'Manage Groups', color: Colors.indigoAccent, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const GroupListScreen()))),
+                  // const SizedBox(height: 12),
+                  // _buildGlassActionCard(icon: Icons.monetization_on, label: 'Fee Structures', color: Colors.amberAccent, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FeeListScreen()))),
                   const SizedBox(height: 12),
                   _buildGlassActionCard(icon: Icons.edit_calendar, label: 'Bulk Extend Dates', color: Colors.pinkAccent, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BulkExtendScreen()))),
 
