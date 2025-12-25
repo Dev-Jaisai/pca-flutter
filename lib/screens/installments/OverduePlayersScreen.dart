@@ -4,7 +4,8 @@ import '../../models/player_installment_summary.dart';
 import '../../services/api_service.dart';
 import '../../services/data_manager.dart';
 import '../../widgets/FinancialSummaryCard.dart';
-import '../../widgets/PlayerSummaryCard.dart';
+import '../../widgets/PlayerSummaryCard.dart'; // ✅ Ensure correct import
+import '../../utils/event_bus.dart'; // ✅ Import Event Bus for refresh
 
 class OverduePlayersScreen extends StatefulWidget {
   const OverduePlayersScreen({super.key});
@@ -22,6 +23,13 @@ class _OverduePlayersScreenState extends State<OverduePlayersScreen> {
   void initState() {
     super.initState();
     _loadData();
+
+    // Listen for payment events to refresh the list
+    EventBus().stream.listen((event) {
+      if (event.action == 'updated' || event.action == 'payment_recorded') {
+        _loadData();
+      }
+    });
   }
 
   Future<void> _loadData() async {
@@ -41,7 +49,7 @@ class _OverduePlayersScreenState extends State<OverduePlayersScreen> {
     }
   }
 
-  // --- 1. LIST LOGIC (Only Pending Items) ---
+  // --- 1. LIST LOGIC (Only Overdue Items) ---
   List<Map<String, dynamic>> _getOverdueGroups() {
     final Map<int, List<PlayerInstallmentSummary>> grouped = {};
     final now = DateTime.now();
@@ -50,11 +58,12 @@ class _OverduePlayersScreenState extends State<OverduePlayersScreen> {
     for (var item in _allItems) {
       if (item.playerId == null) continue;
 
-      // Condition: Past Date AND Not Paid
+      // Condition: Past Date AND Not Paid AND Not Skipped/Left
       final bool isPastDue = item.dueDate != null && item.dueDate!.isBefore(startOfToday);
-      final bool isNotPaid = (item.status ?? '').toUpperCase() != 'PAID';
+      final String status = (item.status ?? '').toUpperCase();
+      final bool isPending = status != 'PAID' && status != 'SKIPPED' && status != 'CANCELLED';
 
-      if (isPastDue && isNotPaid) {
+      if (isPastDue && isPending) {
         if (!grouped.containsKey(item.playerId)) {
           grouped[item.playerId!] = [];
         }
@@ -70,6 +79,13 @@ class _OverduePlayersScreenState extends State<OverduePlayersScreen> {
       double totalPaidSoFar = 0;
       double totalRemaining = 0;
 
+      // Sort installments (Latest First) to get correct Due Date
+      installments.sort((a, b) {
+        DateTime dateA = a.dueDate ?? DateTime(2000);
+        DateTime dateB = b.dueDate ?? DateTime(2000);
+        return dateB.compareTo(dateA); // Descending
+      });
+
       for (var inst in installments) {
         totalOverdue += (inst.installmentAmount ?? 0);
         totalPaidSoFar += (inst.totalPaid);
@@ -82,6 +98,9 @@ class _OverduePlayersScreenState extends State<OverduePlayersScreen> {
           name: first.playerName,
           group: first.groupName ?? '',
           phone: first.phone ?? '',
+          // Assuming billingDay is available via API or default to 1
+          // If your API sends billingDay in summary, use it here.
+          billingDay: 1,
         ),
         'summary': PlayerInstallmentSummary(
           playerId: pid,
@@ -90,11 +109,15 @@ class _OverduePlayersScreenState extends State<OverduePlayersScreen> {
           installmentAmount: totalOverdue,
           remaining: totalRemaining,
           status: 'PENDING',
+          // Use the oldest overdue date or latest? Usually latest bill date for period logic.
+          dueDate: installments.first.dueDate,
+          installmentId: installments.first.installmentId, // For payment action
         ),
         'installments': installments
       });
     });
 
+    // Sort by Highest Remaining Amount
     result.sort((a, b) {
       final remA = (a['summary'] as PlayerInstallmentSummary).remaining ?? 0;
       final remB = (b['summary'] as PlayerInstallmentSummary).remaining ?? 0;
@@ -104,7 +127,7 @@ class _OverduePlayersScreenState extends State<OverduePlayersScreen> {
     return result;
   }
 
-  // --- 2. HEADER LOGIC (All History Stats) ---
+  // --- 2. HEADER LOGIC (Global Stats) ---
   Map<String, double> _calculateGlobalOverdueStats() {
     double totalTarget = 0;
     double totalCollected = 0;
@@ -114,10 +137,17 @@ class _OverduePlayersScreenState extends State<OverduePlayersScreen> {
     final startOfToday = DateTime(now.year, now.month, now.day);
 
     for (var item in _allItems) {
-      if (item.dueDate != null && item.dueDate!.isBefore(startOfToday)) {
+      final status = (item.status ?? '').toUpperCase();
+      // Only count valid pending bills
+      if (item.dueDate != null && item.dueDate!.isBefore(startOfToday) &&
+          status != 'SKIPPED' && status != 'CANCELLED') {
+
         totalTarget += (item.installmentAmount ?? 0);
         totalCollected += item.totalPaid;
-        totalPending += (item.remaining ?? 0);
+        // Only add if not paid
+        if (status != 'PAID') {
+          totalPending += (item.remaining ?? 0);
+        }
       }
     }
     return {'target': totalTarget, 'collected': totalCollected, 'pending': totalPending};
@@ -129,7 +159,7 @@ class _OverduePlayersScreenState extends State<OverduePlayersScreen> {
     final stats = _calculateGlobalOverdueStats();
 
     return Scaffold(
-      extendBodyBehindAppBar: true, // Needed for gradient background
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
         title: Text('Overdue Players (${overdueList.length})', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
         centerTitle: true,
@@ -149,22 +179,18 @@ class _OverduePlayersScreenState extends State<OverduePlayersScreen> {
       ),
       body: Stack(
         children: [
-          // 1. BACKGROUND GRADIENT (Deep Space)
+          // 1. BACKGROUND GRADIENT
           Container(
             decoration: const BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [
-                  Color(0xFF0F2027), // Deep Black-Blue
-                  Color(0xFF203A43), // Slate
-                  Color(0xFF2C5364), // Teal-Dark
-                ],
+                colors: [Color(0xFF0F2027), Color(0xFF203A43), Color(0xFF2C5364)],
               ),
             ),
           ),
 
-          // 2. GLOWING ORBS (Visual Effects)
+          // 2. GLOWING ORBS
           Positioned(
             top: -50, right: -50,
             child: Container(
@@ -205,7 +231,7 @@ class _OverduePlayersScreenState extends State<OverduePlayersScreen> {
                 padding: const EdgeInsets.only(top: 10, bottom: 80),
                 itemCount: overdueList.length + 1,
                 itemBuilder: (ctx, i) {
-                  // 1. Show Header (Global Stats)
+                  // 1. Show Header
                   if (i == 0) {
                     return FinancialSummaryCard(
                       title: "Total Past Dues",
@@ -220,7 +246,7 @@ class _OverduePlayersScreenState extends State<OverduePlayersScreen> {
                   final data = overdueList[i - 1];
 
                   return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), // Adjusted Padding
                     child: PlayerSummaryCard(
                       player: data['player'] as Player,
                       summary: data['summary'] as PlayerInstallmentSummary,

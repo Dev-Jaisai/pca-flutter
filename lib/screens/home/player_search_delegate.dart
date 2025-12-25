@@ -1,9 +1,11 @@
 import 'dart:ui'; // Glassmorphism
 import 'package:flutter/material.dart';
+import 'package:textewidget/widgets/PlayerSummaryCard.dart';
 import '../../models/player.dart';
 import '../../models/player_installment_summary.dart';
 import '../../services/data_manager.dart';
-import '../../widgets/PlayerSummaryCard.dart';
+
+// ✅ FIX: File name should match exactly (usually lowercase snake_case)
 
 class PlayerSearchDelegate extends SearchDelegate {
   final List<Player> players;
@@ -14,14 +16,14 @@ class PlayerSearchDelegate extends SearchDelegate {
   ThemeData appBarTheme(BuildContext context) {
     return ThemeData.dark().copyWith(
       appBarTheme: const AppBarTheme(
-        backgroundColor: Color(0xFF1F2937), // Lighter Slate Blue Header
+        backgroundColor: Color(0xFF1F2937),
         elevation: 0,
       ),
       inputDecorationTheme: const InputDecorationTheme(
         border: InputBorder.none,
-        hintStyle: TextStyle(color: Colors.white70), // Brighter Hint
+        hintStyle: TextStyle(color: Colors.white70),
       ),
-      scaffoldBackgroundColor: const Color(0xFF111827), // Lighter Midnight Background
+      scaffoldBackgroundColor: const Color(0xFF111827),
     );
   }
 
@@ -50,7 +52,6 @@ class PlayerSearchDelegate extends SearchDelegate {
   Widget _buildList(BuildContext context) {
     final results = players.where((p) => p.name.toLowerCase().contains(query.toLowerCase())).toList();
 
-    // --- LIGHTER GRADIENT BACKGROUND ---
     return Container(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
@@ -87,12 +88,11 @@ class PlayerSearchDelegate extends SearchDelegate {
               // 1. Player che sagale installments ghyayche
               final myInstallments = allInstallments.where((i) => i.playerId == player.id).toList();
 
-              // 2. Tyanla Sort karayche (Latest First)
-              // Manje aplalyala kalel ki sadhya chi situation kay ahe
+              // 2. Sort karayche (Latest First)
               myInstallments.sort((a, b) {
                 DateTime dateA = a.dueDate ?? DateTime(2000);
                 DateTime dateB = b.dueDate ?? DateTime(2000);
-                return dateB.compareTo(dateA); // Descending (Latest var)
+                return dateB.compareTo(dateA);
               });
 
               double sumTotal = 0, sumPaid = 0, sumRemaining = 0;
@@ -110,19 +110,17 @@ class PlayerSearchDelegate extends SearchDelegate {
                 }
               }
 
-              // 🔥 KEY FIX: Logic to determine the correct STATUS
+              // 🔥 STATUS LOGIC
               String displayStatus = 'PENDING';
 
               if (myInstallments.isNotEmpty) {
-                // Latest installment cha status check kara
                 String latestRealStatus = (myInstallments.first.status ?? '').toUpperCase();
 
                 if (latestRealStatus == 'SKIPPED') {
-                  displayStatus = 'SKIPPED'; // 🏖️ Holiday Detected
+                  displayStatus = 'SKIPPED';
                 } else if (latestRealStatus == 'CANCELLED') {
-                  displayStatus = 'CANCELLED'; // ⛔ Left Detected
+                  displayStatus = 'CANCELLED';
                 } else {
-                  // Jar Skipped nsel, tar calculation logic vapra
                   if (sumRemaining <= 0) {
                     displayStatus = 'PAID';
                   } else {
@@ -130,7 +128,7 @@ class PlayerSearchDelegate extends SearchDelegate {
                   }
                 }
               } else {
-                displayStatus = 'PAID'; // No bills = No tension
+                displayStatus = 'PAID';
               }
 
               final aggregatedSummary = PlayerInstallmentSummary(
@@ -139,11 +137,9 @@ class PlayerSearchDelegate extends SearchDelegate {
                 totalPaid: sumPaid,
                 installmentAmount: sumTotal,
                 remaining: sumRemaining,
-
-                // 🔥 Pass the CORRECT status here
                 status: displayStatus,
-
                 lastPaymentDate: latestPaymentDate,
+                // 🔥 Pass correct Due Date
                 dueDate: myInstallments.isNotEmpty ? myInstallments.first.dueDate : DateTime.now(),
               );
 
