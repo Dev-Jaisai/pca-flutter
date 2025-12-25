@@ -98,8 +98,6 @@ class Player {
     if (pCycleRaw != null) {
       pCycle = (pCycleRaw is int) ? pCycleRaw : int.tryParse(pCycleRaw.toString());
     }
-
-    // 🔥 9. NEW: Active Status Logic (Handle both camelCase & snake_case)
     bool activeVal = true; // Default
     if (json['isActive'] != null) {
       activeVal = json['isActive'] as bool;
@@ -111,7 +109,6 @@ class Player {
         activeVal = json['is_active'];
       }
     }
-
     return Player(
       id: idVal,
       name: json['name'] ?? 'Unknown',      phone: json['phone'] ?? '',
@@ -120,6 +117,7 @@ class Player {
       age: ageVal,
       joinDate: jd,
       photoUrl: photo,
+
       notes: notesVal,
       billingDay: bDay,
       paymentCycleMonths: pCycle,

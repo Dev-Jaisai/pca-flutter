@@ -33,6 +33,24 @@ class ApiService {
           'Failed to load players: ${response.statusCode} - ${response.body}');
     }
   }
+  static Future<Player> fetchPlayerById(int id) async {
+    final url = Uri.parse('$baseUrl/api/players/$id');
+    final response = await http.get(url);
+
+    if (response.statusCode == 200) {
+      final Map<String, dynamic> data = json.decode(response.body);
+
+      // 🔥 DEBUG: Print the raw JSON
+      debugPrint("📦 Raw JSON from fetchPlayerById($id):");
+      debugPrint(data.toString());
+      debugPrint("isActive in JSON: ${data['isActive']}");
+      debugPrint("is_active in JSON: ${data['is_active']}");
+
+      return Player.fromJson(data);
+    } else {
+      throw Exception('Failed to load player: ${response.statusCode} - ${response.body}');
+    }
+  }
 // ✅ UPDATED createPlayer
   static Future<Player> createPlayer({
     required String name,
