@@ -337,17 +337,21 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
       ),
     );
   }
-
   Widget _buildGlassCard(Installment it) {
     final double total = it.amount ?? 0.0;
     final double paid = it.paidAmount ?? 0.0;
 
-    // 🔥 1. STATUS FLAGS
+    // 🔥 1. STATUS FLAGS & WAIVED LOGIC
     final String statusStr = (it.status ?? '').toUpperCase();
-    final bool isSkipped = statusStr == 'SKIPPED';
-    final bool isCancelled = statusStr == 'CANCELLED'; // Player Left
-    final bool isPaid = !isSkipped && !isCancelled && ((total - paid) <= 0 || statusStr == 'PAID');
-    final bool isOverdue = !isSkipped && !isCancelled && !isPaid && it.dueDate != null && it.dueDate!.isBefore(DateTime.now());
+    final String notes = (it.notes ?? '').toLowerCase(); // Notes for checking Waived
+
+    // Check if it is Waived (Left) or Just Holiday
+    final bool isWaived = statusStr == 'SKIPPED' && (notes.contains('left') || notes.contains('waived'));
+    final bool isSkipped = statusStr == 'SKIPPED' && !isWaived; // True Holiday
+
+    final bool isCancelled = statusStr == 'CANCELLED';
+    final bool isPaid = !isSkipped && !isWaived && !isCancelled && ((total - paid) <= 0 || statusStr == 'PAID');
+    final bool isOverdue = !isSkipped && !isWaived && !isCancelled && !isPaid && it.dueDate != null && it.dueDate!.isBefore(DateTime.now());
 
     // 🔥 2. DYNAMIC COLORS
     Color cardBgColor;
@@ -356,20 +360,20 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
     String statusLabel;
     Color statusChipColor;
 
-    if (isSkipped) {
+    if (isWaived || isCancelled) {
+      // ⛔ LEFT / WAIVED (Grey Box)
+      cardBgColor = Colors.grey.shade400;
+      textColor = Colors.black;
+      subTextColor = Colors.black87;
+      statusLabel = "LEFT";
+      statusChipColor = Colors.black;
+    } else if (isSkipped) {
       // 🏖️ HOLIDAY (White Box)
       cardBgColor = Colors.white.withOpacity(0.95);
       textColor = Colors.black;
       subTextColor = Colors.black54;
       statusLabel = "HOLIDAY";
       statusChipColor = Colors.blueGrey;
-    } else if (isCancelled) {
-      // ⛔ LEFT (Grey Box)
-      cardBgColor = Colors.grey.shade400;
-      textColor = Colors.black;
-      subTextColor = Colors.black87;
-      statusLabel = "LEFT";
-      statusChipColor = Colors.black;
     } else {
       // 🟢 NORMAL (Glass Dark)
       cardBgColor = Colors.white.withOpacity(0.05);
@@ -379,20 +383,22 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
       statusChipColor = isPaid ? Colors.greenAccent : (isOverdue ? Colors.redAccent : Colors.orangeAccent);
     }
 
-    // --- BILL PERIOD LOGIC ---
+    // --- 🔥 BILL PERIOD TITLE LOGIC (UPDATED) ---
     int cycle = widget.player.paymentCycleMonths ?? 1;
     DateTime endDate = DateTime(it.periodYear ?? DateTime.now().year, it.periodMonth ?? 1);
-    DateTime startDate = DateTime(endDate.year, endDate.month - cycle + 1);
+    DateTime startDate;
+
+    if (cycle > 1) {
+      startDate = DateTime(endDate.year, endDate.month - cycle + 1);
+    } else {
+      startDate = DateTime(endDate.year, endDate.month - 1);
+    }
 
     String titleText;
-    if (cycle > 1) {
-      if (startDate.year != endDate.year) {
-        titleText = '${DateFormat('MMM yy').format(startDate)} - ${DateFormat('MMM yy').format(endDate)}';
-      } else {
-        titleText = '${DateFormat('MMM').format(startDate)} - ${DateFormat('MMM').format(endDate)} ${it.periodYear}';
-      }
+    if (startDate.year != endDate.year) {
+      titleText = '${DateFormat('MMM yy').format(startDate)} - ${DateFormat('MMM yy').format(endDate)}';
     } else {
-      titleText = '${DateFormat('MMM').format(endDate)} ${it.periodYear}';
+      titleText = '${DateFormat('MMM').format(startDate)} - ${DateFormat('MMM').format(endDate)} ${it.periodYear}';
     }
 
     return Padding(
@@ -403,7 +409,7 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
           filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
           child: Container(
             decoration: BoxDecoration(
-              color: cardBgColor, // 🔥 Dynamic Background
+              color: cardBgColor,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: Colors.white.withOpacity(0.1)),
             ),
@@ -422,7 +428,7 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                          color: isSkipped || isCancelled ? Colors.transparent : statusChipColor.withOpacity(0.2),
+                          color: isSkipped || isWaived || isCancelled ? Colors.transparent : statusChipColor.withOpacity(0.2),
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(color: statusChipColor)
                       ),
@@ -433,7 +439,7 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
                 const SizedBox(height: 12),
 
                 // --- MIDDLE CONTENT ---
-                if (isSkipped || isCancelled)
+                if (isSkipped || isWaived || isCancelled)
                 // 🔥 CASE A: Holiday/Left -> Show Note Box
                   Container(
                     width: double.infinity,
@@ -448,7 +454,7 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                            isSkipped ? "🏖️ Holiday Reason:" : "⛔ Leaving Reason:",
+                            isSkipped ? "🏖️ Holiday Reason:" : "⛔ Reason:",
                             style: TextStyle(fontSize: 11, color: subTextColor, fontWeight: FontWeight.bold)
                         ),
                         const SizedBox(height: 4),
@@ -476,14 +482,13 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
                   ),
 
                 // --- FOOTER BUTTONS ---
-                // (Skip/Cancel asel tar 'Record' dakhvu naka)
-                if (!isSkipped && !isCancelled) ...[
+                // (Skip/Cancel/Waived asel tar 'Record' dakhvu naka)
+                if (!isSkipped && !isCancelled && !isWaived) ...[
                   const SizedBox(height: 16),
                   Row(
                     children: [
                       Expanded(
                         child: OutlinedButton(
-                          // History Button (Always Visible)
                           onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PaymentsListScreen(installmentId: it.id, remainingAmount: total - paid))),
                           style: OutlinedButton.styleFrom(side: BorderSide(color: subTextColor.withOpacity(0.3)), foregroundColor: textColor),
                           child: const Text("History"),
@@ -495,13 +500,35 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
                         Expanded(
                           child: ElevatedButton(
                             onPressed: () async {
-                              final res = await Navigator.push(context, MaterialPageRoute(builder: (_) => RecordPaymentScreen(installmentId: it.id, remainingAmount: total - paid)));
-                              if (res == true) {
-                                DataManager().invalidatePlayerDetails(widget.player.id);
-                                _loadData(useCache: false);
+                              // Same payment logic...
+                              int actualInstallmentId = it.id;
+                              if (actualInstallmentId <= 0) {
+                                actualInstallmentId = await ApiService.findInstallmentId(
+                                  playerId: widget.player.id,
+                                  periodMonth: it.periodMonth ?? 0,
+                                  periodYear: it.periodYear ?? 0,
+                                );
+                              }
+                              if (actualInstallmentId > 0) {
+                                final res = await Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                        builder: (_) => RecordPaymentScreen(
+                                            installmentId: actualInstallmentId,
+                                            remainingAmount: total - paid
+                                        )
+                                    )
+                                );
+                                if (res == true) {
+                                  DataManager().invalidatePlayerDetails(widget.player.id);
+                                  _loadData(useCache: false);
+                                }
                               }
                             },
-                            style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurpleAccent, foregroundColor: Colors.white),
+                            style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.deepPurpleAccent,
+                                foregroundColor: Colors.white
+                            ),
                             child: const Text("Record"),
                           ),
                         )
@@ -510,7 +537,6 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
                     ],
                   )
                 ] else ...[
-                  // Optional: Just a small spacer if skipped
                   const SizedBox(height: 8),
                 ]
               ],
@@ -520,7 +546,6 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
       ),
     );
   }
-
   Widget _infoCol(String label, String value, Color valColor, Color labelColor) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

@@ -1,25 +1,31 @@
 class PlayerInstallmentSummary {
+  final int? installmentId; // Make sure this matches your JSON (sometimes it is 'id')
   final int playerId;
   final String playerName;
   final String? phone;
   final String? groupName;
   final DateTime? joinDate;
-  final int? installmentId;
   final double? installmentAmount;
   final double totalPaid;
   final double? remaining;
   final DateTime? dueDate;
   final String status;
   final DateTime? lastPaymentDate;
-  final int? paymentCycleMonths; // Added this
+
+  // 🔥 IMPORTANT FIELDS ADDED
+  final int? paymentCycleMonths;
+  final int? periodMonth;
+  final int? periodYear;
+
+  final String? notes;
 
   PlayerInstallmentSummary({
+    this.installmentId,
     required this.playerId,
     required this.playerName,
     this.phone,
     this.groupName,
     this.joinDate,
-    this.installmentId,
     this.installmentAmount,
     required this.totalPaid,
     this.remaining,
@@ -27,6 +33,10 @@ class PlayerInstallmentSummary {
     required this.status,
     this.lastPaymentDate,
     this.paymentCycleMonths,
+    // 🔥 Add to Constructor
+    this.periodMonth,
+    this.periodYear,
+    this.notes,
   });
 
   factory PlayerInstallmentSummary.fromJson(Map<String, dynamic> json) {
@@ -45,7 +55,7 @@ class PlayerInstallmentSummary {
         try {
           return DateTime.parse(value);
         } catch (e) {
-          print("Date Parse Error: $value"); // Debug
+          // print("Date Parse Error: $value");
           return null;
         }
       }
@@ -53,35 +63,35 @@ class PlayerInstallmentSummary {
     }
 
     return PlayerInstallmentSummary(
+      // Handle ID mapping (sometimes backend sends 'id' or 'installmentId')
+      installmentId: json['installmentId'] ?? json['id'],
       playerId: json['playerId'] ?? 0,
       playerName: json['playerName'] ?? 'Unknown',
       phone: json['phone'],
       groupName: json['groupName'],
       joinDate: parseDate(json['joinDate']),
-      installmentId: json['installmentId'],
-      installmentAmount: parseDouble(json['installmentAmount']),
-      totalPaid: parseDouble(json['totalPaid']),
-      remaining: parseDouble(json['remaining']),
+      installmentAmount: parseDouble(json['installmentAmount'] ?? json['amount']), // Check both keys
+      totalPaid: parseDouble(json['totalPaid'] ?? json['paidAmount']),
+      remaining: parseDouble(json['remaining'] ?? json['remainingAmount']),
       dueDate: parseDate(json['dueDate']),
       status: json['status'] ?? 'PENDING',
-
-      // 🔥🔥🔥 THE FIX IS HERE 🔥🔥🔥
-      // Backend returns full ISO string with time (e.g. 2025-12-24T12:00:36...)
-      // This helper will handle it correctly.
       lastPaymentDate: parseDate(json['lastPaymentDate']),
-
       paymentCycleMonths: json['paymentCycleMonths'],
+      notes: json['notes'],
+      // 🔥🔥 MAPPING NEW FIELDS 🔥🔥
+      periodMonth: json['periodMonth'],
+      periodYear: json['periodYear'],
     );
   }
 
   Map<String, dynamic> toJson() {
     return {
+      'installmentId': installmentId,
       'playerId': playerId,
       'playerName': playerName,
       'phone': phone,
       'groupName': groupName,
       'joinDate': joinDate?.toIso8601String(),
-      'installmentId': installmentId,
       'installmentAmount': installmentAmount,
       'totalPaid': totalPaid,
       'remaining': remaining,
@@ -89,6 +99,9 @@ class PlayerInstallmentSummary {
       'status': status,
       'lastPaymentDate': lastPaymentDate?.toIso8601String(),
       'paymentCycleMonths': paymentCycleMonths,
+      'periodMonth': periodMonth,
+      'periodYear': periodYear,
+      'notes': notes, // 🔥 He add karu shakta (Optional for now)
     };
   }
 }
