@@ -27,7 +27,14 @@ class _RecordPaymentScreenState extends State<RecordPaymentScreen> {
     _refCtl.dispose();
     super.dispose();
   }
-
+// RecordPaymentScreen मध्ये initState मध्ये:
+  @override
+  void initState() {
+    super.initState();
+    debugPrint("🎯 RecordPaymentScreen opened:");
+    debugPrint("  - Installment ID: ${widget.installmentId}");
+    debugPrint("  - Remaining Amount: ${widget.remainingAmount}");
+  }
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 

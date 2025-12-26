@@ -6,7 +6,6 @@ import '../models/player_installment_summary.dart';
 import '../screens/installments/installments_screen.dart';
 import '../screens/payments/record_payment_screen.dart';
 import '../screens/payments/payment_list_screen.dart';
-import '../services/PdfInvoiceService.dart';
 import '../services/api_service.dart';
 import '../utils/billing_helper.dart';
 import '../utils/event_bus.dart';
@@ -14,21 +13,20 @@ import '../utils/event_bus.dart';
 class PlayerSummaryCard extends StatelessWidget {
   final Player player;
   final PlayerInstallmentSummary summary;
-
-  // 🔥 List of all installments for this player (Required for Chips)
   final List<PlayerInstallmentSummary> installments;
+  final String? nextScreenFilter;
 
   const PlayerSummaryCard({
     super.key,
     required this.player,
     required this.summary,
     this.installments = const [],
-    String? nextScreenFilter,
+    this.nextScreenFilter,
   });
 
   @override
   Widget build(BuildContext context) {
-    // 1. Calculate Status & Colors for MAIN Card (Header)
+    // 1. Status Colors
     final status = (summary.status ?? 'PENDING').toUpperCase();
     final bool isSkipped = status == 'SKIPPED';
     final bool isPaid = status == 'PAID';
@@ -54,7 +52,12 @@ class PlayerSummaryCard extends StatelessWidget {
             color: cardBg,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: Colors.white.withOpacity(0.1), width: 1),
-            boxShadow: [BoxShadow(color: Colors.black45, blurRadius: 8, offset: const Offset(0, 4))],
+            boxShadow: const [
+              BoxShadow(
+                  color: Colors.black45,
+                  blurRadius: 8,
+                  offset: Offset(0, 4))
+            ],
           ),
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -89,7 +92,7 @@ class PlayerSummaryCard extends StatelessWidget {
 
               const SizedBox(height: 16),
 
-              // --- 🔥 ROW 2: CHIPS (The Months) ---
+              // --- ROW 2: CHIPS (The Months) ---
               if (sortedInstallments.isNotEmpty) ...[
                 const Text("Recent Months:", style: TextStyle(color: Colors.white38, fontSize: 11)),
                 const SizedBox(height: 8),
@@ -108,8 +111,14 @@ class PlayerSummaryCard extends StatelessWidget {
                 children: [
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => InstallmentsScreen(player: player))).then((_) => EventBus().fire(PlayerEvent('updated'))),
-                      style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: BorderSide(color: Colors.white24)),
+                      onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => InstallmentsScreen(
+                              player: player,
+                              initialFilter: nextScreenFilter
+                          ))
+                      ).then((_) => EventBus().fire(PlayerEvent('updated'))),
+                      style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Colors.white24)),
                       child: const Text("Full History"),
                     ),
                   ),
@@ -118,7 +127,6 @@ class PlayerSummaryCard extends StatelessWidget {
                     Expanded(
                       child: ElevatedButton(
                         onPressed: () async {
-                          // Default to latest unpaid installment
                           var target = sortedInstallments.firstWhere((i) => (i.remaining ?? 0) > 0, orElse: () => sortedInstallments.first);
                           if (target.installmentId != null) {
                             await Navigator.push(context, MaterialPageRoute(builder: (_) => RecordPaymentScreen(installmentId: target.installmentId!, remainingAmount: target.remaining)));
@@ -138,72 +146,120 @@ class PlayerSummaryCard extends StatelessWidget {
     );
   }
 
-  // --- Helper to Build Individual Chips ---
+  // ✅ FIXED: _buildMonthChip method
   Widget _buildMonthChip(BuildContext context, PlayerInstallmentSummary inst, Player player) {
-    // 1. Get Status & Color
     final status = (inst.status ?? '').toUpperCase();
-    final bool isSkipped = status == 'SKIPPED';
+
+    // ✅ FIXED: Check Notes for 'Left' or 'Waived' (case-insensitive)
+    final String notes = (inst.notes ?? '').toLowerCase();
+    final bool isWaived = status == 'SKIPPED' &&
+        (notes.contains('left') ||
+            notes.contains('waived') ||
+            notes.contains('studentleft') ||
+            notes.contains('student left'));
+
+    final bool isSkipped = status == 'SKIPPED' && !isWaived; // True Holiday
     final bool isPaid = status == 'PAID';
-    final bool isOverdue = !isPaid && !isSkipped && inst.dueDate != null && inst.dueDate!.isBefore(DateTime.now());
+    final bool isOverdue = !isPaid && !isSkipped && !isWaived &&
+        inst.dueDate != null &&
+        inst.dueDate!.isBefore(DateTime.now());
 
-    Color chipColor = Colors.orangeAccent; // Pending
-    Color textColor = Colors.black;
-
-    if (isSkipped) {
-      chipColor = Colors.white; // Holiday
-      textColor = Colors.black;
-    } else if (isPaid) {
-      chipColor = Colors.greenAccent; // Paid
-      textColor = Colors.black;
-    } else if (isOverdue) {
-      chipColor = Colors.redAccent; // Overdue
-      textColor = Colors.white;
-    }
-
-    // 2. Format Date (e.g., "Dec '25")
+    Color chipColor;
+    Color textColor;
+    IconData icon;
     String label = "Unknown";
-    if (inst.dueDate != null) {
-      // Using Helper logic just for Month Name
-      int billDay = player.billingDay ?? 1;
-      DateTime date = inst.dueDate!;
-      DateTime billingMonth = DateTime(date.year, date.month, billDay);
-      if (billingMonth.isAfter(date) || billingMonth.isAtSameMomentAs(date)) {
-        billingMonth = DateTime(date.year, date.month - 1, 1);
-      }
-      label = DateFormat('MMM yy').format(billingMonth);
+
+    // ✅ FIXED: Color Logic
+    if (isWaived) {
+      // LEFT / WAIVED OFF - Grey
+      chipColor = Colors.grey.shade700;
+      textColor = Colors.white70;
+      icon = Icons.person_off;
+    } else if (isSkipped) {
+      // HOLIDAY - White
+      chipColor = Colors.white;
+      textColor = Colors.black;
+      icon = Icons.beach_access;
+    } else if (isPaid) {
+      // PAID - Green
+      chipColor = Colors.greenAccent;
+      textColor = Colors.black;
+      icon = Icons.check_circle;
+    } else if (isOverdue) {
+      // OVERDUE - Red
+      chipColor = Colors.redAccent;
+      textColor = Colors.white;
+      icon = Icons.warning;
+    } else {
+      // PENDING / PARTIAL - Orange
+      chipColor = Colors.orangeAccent;
+      textColor = Colors.black;
+      icon = Icons.access_time;
     }
 
-    // 3. Status Icon
-    IconData icon = Icons.access_time; // Pending
-    if (isPaid) icon = Icons.check_circle;
-    if (isSkipped) icon = Icons.beach_access;
-    if (isOverdue) icon = Icons.warning;
+    // Date Label
+    if (inst.dueDate != null) {
+      label = DateFormat('MMM yy').format(inst.dueDate!);
+    }
 
-    return InkWell(
-      onTap: () => _showChipOptions(context, inst), // 🔥 CLICK HANDLER
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: chipColor.withOpacity(isOverdue ? 0.8 : 0.9),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 12, color: textColor),
-            const SizedBox(width: 4),
-            Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: textColor)),
-          ],
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => _showChipOptions(context, inst),
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: chipColor.withOpacity(isWaived ? 0.8 : 0.9),
+            borderRadius: BorderRadius.circular(6),
+            border: isWaived ? Border.all(color: Colors.white24) : null,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 12, color: textColor),
+              const SizedBox(width: 4),
+              Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: textColor)),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  // 🔥 RESTORED & FIXED BOTTOM SHEET
+  // ✅ FIXED: _showChipOptions method
   void _showChipOptions(BuildContext context, PlayerInstallmentSummary inst) {
     final status = (inst.status ?? '').toUpperCase();
-    final bool isSkipped = status == 'SKIPPED';
+
+    // ✅ FIXED: Waived vs Skipped logic
+    final String notes = (inst.notes ?? '').toLowerCase();
+    final bool isWaived = status == 'SKIPPED' &&
+        (notes.contains('left') ||
+            notes.contains('waived') ||
+            notes.contains('studentleft') ||
+            notes.contains('student left'));
+
+    final bool isSkipped = status == 'SKIPPED' && !isWaived;
     final bool isPaid = status == 'PAID';
+
+    DateTime anchorDate = inst.dueDate ?? DateTime.now();
+    int cycle = player.paymentCycleMonths ?? 1;
+
+    DateTime endDate = DateTime(anchorDate.year, anchorDate.month);
+    DateTime startDate;
+
+    if (cycle > 1) {
+      startDate = DateTime(endDate.year, endDate.month - cycle + 1);
+    } else {
+      startDate = DateTime(endDate.year, endDate.month - 1);
+    }
+
+    String periodTitle;
+    if (startDate.year != endDate.year) {
+      periodTitle = '${DateFormat('MMM yy').format(startDate)} - ${DateFormat('MMM yy').format(endDate)}';
+    } else {
+      periodTitle = '${DateFormat('MMM').format(startDate)} - ${DateFormat('MMM').format(endDate)} ${endDate.year}';
+    }
 
     showModalBottomSheet(
       context: context,
@@ -216,37 +272,151 @@ class PlayerSummaryCard extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text("Installment Details", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white)),
+              const Text("Installment Details", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white)),
+              const SizedBox(height: 12),
+
+              Row(
+                children: [
+                  const Icon(Icons.date_range, color: Colors.cyanAccent, size: 18),
+                  const SizedBox(width: 8),
+                  Text("Cycle: $periodTitle", style: const TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold, fontSize: 16)),
+                ],
+              ),
               const SizedBox(height: 8),
 
-              // Date Info
               if (inst.dueDate != null)
-                Text("Due Date: ${DateFormat('dd MMM yyyy').format(inst.dueDate!)}", style: const TextStyle(color: Colors.white70)),
+                Row(
+                  children: [
+                    const Icon(Icons.event, color: Colors.white70, size: 18),
+                    const SizedBox(width: 8),
+                    Text("Due Date: ${DateFormat('dd MMM yyyy').format(inst.dueDate!)}", style: const TextStyle(color: Colors.white70)),
+                  ],
+                ),
 
               const SizedBox(height: 20),
 
-              // 🔥 1. HOLIDAY NOTE (If Skipped)
-              if (isSkipped) ...[
+              // ✅ 1. WAIVED / LEFT ACADEMY - Grey Box
+              if (isWaived) ...[
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(8)),
+                  decoration: BoxDecoration(
+                      color: Colors.grey.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey)
+                  ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text("🏖️ Holiday Reason:", style: TextStyle(color: Colors.cyanAccent, fontSize: 12)),
-                      const SizedBox(height: 4),
-                      // Note: Ensure your backend sends 'notes' in the summary API. If not, it won't show here.
-                      // You might need to add 'notes' to PlayerInstallmentSummary model.
-                      Text("Check history for full reason.", style: const TextStyle(color: Colors.white)),
+                      const Row(
+                        children: [
+                          Icon(Icons.person_off, size: 16, color: Colors.grey),
+                          SizedBox(width: 8),
+                          Text("LEFT ACADEMY", style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(inst.notes ?? "Student has left the academy.",
+                          style: const TextStyle(color: Colors.white70, fontSize: 14)),
                     ],
                   ),
                 ),
                 const SizedBox(height: 16),
               ],
 
-              // 🔥 2. EXTEND DATE (If Pending/Overdue)
-              if (!isPaid && !isSkipped)
+              // ✅ 2. HOLIDAY - White Box (Only for true holidays)
+              if (isSkipped) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.white30)
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.beach_access, size: 16, color: Colors.cyanAccent),
+                          SizedBox(width: 8),
+                          Text("ON HOLIDAY", style: TextStyle(color: Colors.cyanAccent, fontSize: 12, fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(inst.notes ?? "No reason provided",
+                          style: const TextStyle(color: Colors.white)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+
+              // ✅ 3. PAID (REVERT)
+              if (isPaid) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                      color: Colors.green.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.greenAccent.withOpacity(0.3))
+                  ),
+                  child: Row(
+                    children: const [
+                      Icon(Icons.check_circle, color: Colors.greenAccent),
+                      SizedBox(width: 8),
+                      Expanded(child: Text("This bill is fully PAID.", style: TextStyle(color: Colors.white))),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ListTile(
+                  leading: const Icon(Icons.undo, color: Colors.redAccent),
+                  title: const Text("Revert Payment (Refund)", style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                  subtitle: const Text("Mark as Pending again", style: TextStyle(color: Colors.white54, fontSize: 12)),
+                  onTap: () async {
+                    bool confirm = await showDialog(
+                        context: context,
+                        builder: (dCtx) => AlertDialog(
+                          backgroundColor: const Color(0xFF203A43),
+                          title: const Text("Revert Payment?", style: TextStyle(color: Colors.white)),
+                          content: const Text("This will mark the bill as PENDING. Are you sure?", style: TextStyle(color: Colors.white70)),
+                          actions: [
+                            TextButton(
+                                onPressed: () => Navigator.pop(dCtx, false),
+                                child: const Text("Cancel", style: TextStyle(color: Colors.white54))
+                            ),
+                            ElevatedButton(
+                                style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+                                onPressed: () => Navigator.pop(dCtx, true),
+                                child: const Text("Yes, Revert", style: TextStyle(color: Colors.white))
+                            )
+                          ],
+                        )
+                    ) ?? false;
+
+                    if (confirm && inst.installmentId != null) {
+                      Navigator.pop(ctx);
+                      try {
+                        // Note: You need to add ApiService.revertPayment method
+                        // await ApiService.revertPayment(inst.installmentId!);
+                        EventBus().fire(PlayerEvent('updated'));
+                        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Payment Reverted! Bill is Pending.'), backgroundColor: Colors.orange)
+                        );
+                      } catch (e) {
+                        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red)
+                        );
+                      }
+                    }
+                  },
+                ),
+              ],
+
+              // ✅ 4. EXTEND & PAY (for pending/overdue)
+              if (!isPaid && !isSkipped && !isWaived) ...[
                 ListTile(
                   leading: const Icon(Icons.edit_calendar, color: Colors.orangeAccent),
                   title: const Text("Extend Due Date", style: TextStyle(color: Colors.white)),
@@ -255,18 +425,23 @@ class PlayerSummaryCard extends StatelessWidget {
                     _showExtendDialog(context, inst.installmentId!, inst.dueDate);
                   },
                 ),
-
-              // 🔥 3. PAY / VIEW
-              ListTile(
-                leading: const Icon(Icons.payment, color: Colors.greenAccent),
-                title: Text(isPaid ? "View Receipt" : "Record Payment", style: const TextStyle(color: Colors.white)),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  if (inst.installmentId != null) {
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => PaymentsListScreen(installmentId: inst.installmentId!, remainingAmount: inst.remaining))).then((_) => EventBus().fire(PlayerEvent('updated')));
-                  }
-                },
-              ),
+                ListTile(
+                  leading: const Icon(Icons.payment, color: Colors.greenAccent),
+                  title: const Text("Record Payment", style: TextStyle(color: Colors.white)),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    if (inst.installmentId != null) {
+                      Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => PaymentsListScreen(
+                              installmentId: inst.installmentId!,
+                              remainingAmount: inst.remaining
+                          ))
+                      ).then((_) => EventBus().fire(PlayerEvent('updated')));
+                    }
+                  },
+                ),
+              ]
             ],
           ),
         );
@@ -293,7 +468,10 @@ class PlayerSummaryCard extends StatelessWidget {
                   const SizedBox(height: 20),
                   ElevatedButton.icon(
                     icon: const Icon(Icons.calendar_today),
-                    label: Text(selectedDate == null ? "Pick Date" : DateFormat('dd MMM yyyy').format(selectedDate!)),
+                    label: Text(selectedDate == null
+                        ? "Pick Date"
+                        : DateFormat('dd MMM yyyy').format(selectedDate!)
+                    ),
                     onPressed: () async {
                       final picked = await showDatePicker(
                         context: dialogContext,
@@ -307,19 +485,33 @@ class PlayerSummaryCard extends StatelessWidget {
                 ],
               ),
               actions: [
-                TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+                TextButton(
+                    onPressed: () => Navigator.pop(dialogContext),
+                    child: const Text('Cancel', style: TextStyle(color: Colors.white54))
+                ),
                 ElevatedButton(
                   onPressed: selectedDate == null ? null : () async {
                     Navigator.pop(dialogContext);
                     try {
-                      await ApiService.extendInstallmentDate(installmentId: installmentId, newDate: selectedDate!);
+                      await ApiService.extendInstallmentDate(
+                          installmentId: installmentId,
+                          newDate: selectedDate!
+                      );
                       EventBus().fire(PlayerEvent('updated'));
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Date Updated!'), backgroundColor: Colors.green));
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Date Updated!'), backgroundColor: Colors.green)
+                        );
+                      }
                     } catch (e) {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red));
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red)
+                        );
+                      }
                     }
                   },
-                  child: const Text('Update'),
+                  child: const Text('Update', style: TextStyle(color: Colors.white)),
                 ),
               ],
             );

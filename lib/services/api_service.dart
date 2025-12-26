@@ -103,8 +103,37 @@ class ApiService {
       throw Exception(
           'Failed to delete player: ${response.statusCode} - ${response.body}');
     }
-  }
+  }static Future<void> markPlayerLeft(int playerId, DateTime date, String option, String? amount) async {
+    final dateStr = date.toIso8601String().split('T')[0];
+    String urlStr = '$baseUrl/api/player-lifecycle/$playerId/left?date=$dateStr&option=$option';
+    if (amount != null && amount.isNotEmpty) {
+      urlStr += '&amount=$amount';
+    }
 
+    final response = await http.post(
+      Uri.parse(urlStr),
+      headers: {'Content-Type': 'application/json'},
+    );
+
+    if (response.statusCode != 200) {
+      // 🔥 Extract clean message from backend response
+      // Backend error format is usually verbose, let's try to get the message part
+      String errorMessage = response.body;
+
+      // Jar JSON format madhye error aala asel tar parse kara (optional)
+      try {
+        final Map<String, dynamic> errorJson = json.decode(response.body);
+        if (errorJson.containsKey('message')) {
+          errorMessage = errorJson['message'];
+        }
+      } catch (_) {
+        // If not JSON, use raw body
+      }
+
+      // Throw clean error
+      throw Exception(errorMessage);
+    }
+  }
 
   // ✅ NEW: Bulk Extend for Holidays (+ Days logic)
   static Future<void> bulkExtendDays({
@@ -297,6 +326,12 @@ class ApiService {
     String? paymentMethod,
     String? reference,
   }) async {
+    debugPrint("💳 Recording Payment:");
+    debugPrint("  - Installment ID: $installmentId");
+    debugPrint("  - Amount: $amount");
+    debugPrint("  - Method: $paymentMethod");
+    debugPrint("  - Reference: $reference");
+
     final url = Uri.parse('$baseUrl/api/payments');
     final body = {
       'installmentId': installmentId,
@@ -305,18 +340,22 @@ class ApiService {
       if (reference != null) 'reference': reference,
     };
 
+    debugPrint("  - Request Body: $body");
+
     final response = await http.post(
       url,
       headers: {'Content-Type': 'application/json'},
       body: json.encode(body),
     );
 
+    debugPrint("  - Response Status: ${response.statusCode}");
+    debugPrint("  - Response Body: ${response.body}");
+
     if (response.statusCode != 200 && response.statusCode != 201) {
       throw Exception(
           'Failed to record payment: ${response.statusCode} - ${response.body}');
     }
   }
-
 // fetch payments for an installment
   static Future<List<Payment>> fetchPaymentsByInstallment(
       int installmentId) async {
@@ -332,7 +371,34 @@ class ApiService {
           'Failed to load payments: ${response.statusCode} - ${response.body}');
     }
   }
+// Get installment by player and period (योग्य ID शोधण्यासाठी)
+  static Future<int> findInstallmentId({
+    required int playerId,
+    required int periodMonth,
+    required int periodYear,
+  }) async {
+    try {
+      final url = Uri.parse('$baseUrl/api/installments/player/$playerId');
+      final response = await http.get(url);
 
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+
+        for (var item in data) {
+          if (item['periodMonth'] == periodMonth &&
+              item['periodYear'] == periodYear &&
+              item['id'] != null &&
+              item['id'] > 0) {
+            return item['id'] as int;
+          }
+        }
+      }
+      return 0; // Not found
+    } catch (e) {
+      debugPrint("Error finding installment ID: $e");
+      return 0;
+    }
+  }
 // add method
   static Future<List<InstallmentStatus>> fetchInstallmentStatus({
     int? month,
@@ -376,6 +442,19 @@ class ApiService {
     }
   }
 
+  // --- REVERT PAYMENT API ---
+  static Future<void> revertPayment(int installmentId) async {
+    final url = Uri.parse('$baseUrl/api/installments/$installmentId/revert');
+
+    final response = await http.post(
+      url,
+      headers: {'Content-Type': 'application/json'},
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to revert payment: ${response.body}');
+    }
+  }
   // Create single installment for a player (optional endpoint on your backend)
   static Future<void> createInstallmentForPlayer({
     required int playerId,
