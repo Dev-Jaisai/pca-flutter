@@ -1,11 +1,13 @@
+import 'dart:async'; // 🔥 Required for Subscription
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../../models/player.dart';
 import '../../models/player_installment_summary.dart';
 import '../../services/api_service.dart';
 import '../../services/data_manager.dart';
 import '../../widgets/FinancialSummaryCard.dart';
-import '../../widgets/PlayerSummaryCard.dart'; // ✅ Ensure correct import
-import '../../utils/event_bus.dart'; // ✅ Import Event Bus for refresh
+import '../../widgets/PlayerSummaryCard.dart';
+import '../../utils/event_bus.dart';
 
 class OverduePlayersScreen extends StatefulWidget {
   const OverduePlayersScreen({super.key});
@@ -19,33 +21,64 @@ class _OverduePlayersScreenState extends State<OverduePlayersScreen> {
   bool _isLoading = true;
   String? _error;
 
+  // 🔥 1. Subscription Variable
+  late StreamSubscription<PlayerEvent> _eventSubscription;
+
   @override
   void initState() {
     super.initState();
-    _loadData();
+    // 🔥 Cache First Strategy
+    _initialLoad();
 
-    // Listen for payment events to refresh the list
-    EventBus().stream.listen((event) {
-      if (event.action == 'updated' || event.action == 'payment_recorded') {
-        _loadData();
+    // 🔥 Live Listener
+    _eventSubscription = EventBus().stream.listen((event) {
+      if (['updated', 'payment_recorded', 'installment_created'].contains(event.action)) {
+        debugPrint("🔄 Auto-refreshing Overdue List due to event: ${event.action}");
+        _loadData(forceRefresh: true, showLoading: false);
       }
     });
   }
 
-  Future<void> _loadData() async {
-    final cached = await DataManager().getCachedAllInstallments();
-    if (cached != null && cached.isNotEmpty) {
-      if (mounted) setState(() { _allItems = cached; _isLoading = false; });
-    } else {
-      if (mounted) setState(() => _isLoading = true);
+  @override
+  void dispose() {
+    _eventSubscription.cancel();
+    super.dispose();
+  }
+
+  // 🔥 Helper: Cache First, Then Network
+  Future<void> _initialLoad() async {
+    // 1. Load from Cache (Instant)
+    await _loadData(forceRefresh: false, showLoading: true);
+
+    // 2. Fetch Fresh Data (Background)
+    await _loadData(forceRefresh: true, showLoading: false);
+  }
+
+  Future<void> _loadData({required bool forceRefresh, bool showLoading = false}) async {
+    if (!mounted) return;
+
+    if (showLoading && _allItems.isEmpty) {
+      setState(() => _isLoading = true);
     }
 
     try {
-      final list = await ApiService.fetchAllInstallmentsSummary(page: 0, size: 5000);
-      await DataManager().saveAllInstallments(list);
-      if (mounted) setState(() { _allItems = list; _isLoading = false; _error = null; });
+      // 🔥 DataManager handles caching logic
+      final list = await DataManager().getAllInstallments(forceRefresh: forceRefresh);
+
+      // If cache is empty and not forcing refresh, wait for next call
+      if (!forceRefresh && list.isEmpty) return;
+
+      if (mounted) {
+        setState(() {
+          _allItems = list;
+          _isLoading = false;
+          _error = null;
+        });
+      }
     } catch (e) {
-      if (mounted && _allItems.isEmpty) setState(() { _isLoading = false; _error = e.toString(); });
+      if (mounted && showLoading) {
+        setState(() { _isLoading = false; _error = e.toString(); });
+      }
     }
   }
 
@@ -61,7 +94,12 @@ class _OverduePlayersScreenState extends State<OverduePlayersScreen> {
       // Condition: Past Date AND Not Paid AND Not Skipped/Left
       final bool isPastDue = item.dueDate != null && item.dueDate!.isBefore(startOfToday);
       final String status = (item.status ?? '').toUpperCase();
-      final bool isPending = status != 'PAID' && status != 'SKIPPED' && status != 'CANCELLED';
+      final String notes = (item.notes ?? '').toLowerCase();
+
+      // Check for Left/Waived logic to exclude them from Overdue list if needed
+      final bool isWaived = status == 'SKIPPED' && (notes.contains('left') || notes.contains('waived'));
+
+      final bool isPending = status != 'PAID' && status != 'SKIPPED' && status != 'CANCELLED' && !isWaived;
 
       if (isPastDue && isPending) {
         if (!grouped.containsKey(item.playerId)) {
@@ -73,17 +111,19 @@ class _OverduePlayersScreenState extends State<OverduePlayersScreen> {
 
     List<Map<String, dynamic>> result = [];
     grouped.forEach((pid, installments) {
+      if (installments.isEmpty) return;
+
       final first = installments.first;
 
       double totalOverdue = 0;
       double totalPaidSoFar = 0;
       double totalRemaining = 0;
 
-      // Sort installments (Latest First) to get correct Due Date
+      // Sort installments (Latest First)
       installments.sort((a, b) {
         DateTime dateA = a.dueDate ?? DateTime(2000);
         DateTime dateB = b.dueDate ?? DateTime(2000);
-        return dateB.compareTo(dateA); // Descending
+        return dateB.compareTo(dateA);
       });
 
       for (var inst in installments) {
@@ -98,9 +138,7 @@ class _OverduePlayersScreenState extends State<OverduePlayersScreen> {
           name: first.playerName,
           group: first.groupName ?? '',
           phone: first.phone ?? '',
-          // Assuming billingDay is available via API or default to 1
-          // If your API sends billingDay in summary, use it here.
-          billingDay: 1,
+          billingDay: 1, // Defaulting to 1 if not available
         ),
         'summary': PlayerInstallmentSummary(
           playerId: pid,
@@ -108,10 +146,10 @@ class _OverduePlayersScreenState extends State<OverduePlayersScreen> {
           totalPaid: totalPaidSoFar,
           installmentAmount: totalOverdue,
           remaining: totalRemaining,
-          status: 'PENDING',
-          // Use the oldest overdue date or latest? Usually latest bill date for period logic.
-          dueDate: installments.first.dueDate,
-          installmentId: installments.first.installmentId, // For payment action
+          status: 'PENDING', // Force Pending for visual consistency in list
+          dueDate: installments.first.dueDate, // Latest overdue date
+          installmentId: installments.first.installmentId,
+          notes: installments.first.notes,
         ),
         'installments': installments
       });
@@ -138,13 +176,15 @@ class _OverduePlayersScreenState extends State<OverduePlayersScreen> {
 
     for (var item in _allItems) {
       final status = (item.status ?? '').toUpperCase();
-      // Only count valid pending bills
+      final String notes = (item.notes ?? '').toLowerCase();
+      final bool isWaived = status == 'SKIPPED' && (notes.contains('left') || notes.contains('waived'));
+
       if (item.dueDate != null && item.dueDate!.isBefore(startOfToday) &&
-          status != 'SKIPPED' && status != 'CANCELLED') {
+          status != 'SKIPPED' && status != 'CANCELLED' && !isWaived) {
 
         totalTarget += (item.installmentAmount ?? 0);
         totalCollected += item.totalPaid;
-        // Only add if not paid
+
         if (status != 'PAID') {
           totalPending += (item.remaining ?? 0);
         }
@@ -174,7 +214,10 @@ class _OverduePlayersScreenState extends State<OverduePlayersScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
-          IconButton(icon: const Icon(Icons.refresh, color: Colors.white), onPressed: _loadData),
+          IconButton(
+              icon: const Icon(Icons.refresh, color: Colors.white),
+              onPressed: () => _loadData(forceRefresh: true, showLoading: true)
+          ),
         ],
       ),
       body: Stack(
@@ -224,7 +267,7 @@ class _OverduePlayersScreenState extends State<OverduePlayersScreen> {
               ),
             )
                 : RefreshIndicator(
-              onRefresh: _loadData,
+              onRefresh: () => _loadData(forceRefresh: true, showLoading: true),
               color: Colors.cyanAccent,
               backgroundColor: const Color(0xFF203A43),
               child: ListView.builder(
@@ -246,7 +289,7 @@ class _OverduePlayersScreenState extends State<OverduePlayersScreen> {
                   final data = overdueList[i - 1];
 
                   return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), // Adjusted Padding
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     child: PlayerSummaryCard(
                       player: data['player'] as Player,
                       summary: data['summary'] as PlayerInstallmentSummary,

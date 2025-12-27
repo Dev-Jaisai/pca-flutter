@@ -442,6 +442,8 @@ class ApiService {
     }
   }
 
+
+
   // --- REVERT PAYMENT API ---
   static Future<void> revertPayment(int installmentId) async {
     final url = Uri.parse('$baseUrl/api/installments/$installmentId/revert');
@@ -518,11 +520,18 @@ class ApiService {
       throw Exception('Failed to load installments: ${response.statusCode}');
     }
   }
-
-  static Future<void> pausePlayer(int playerId, DateTime date, String reason) async {
+  static Future<void> pausePlayer(int playerId, DateTime date, String reason, {double? advanceAmount}) async {
     final dateStr = date.toIso8601String().split('T')[0];
-    // URL: /api/player-lifecycle/{id}/pause?date=...&reason=...
-    final url = Uri.parse('$baseUrl/api/player-lifecycle/$playerId/pause?date=$dateStr&reason=$reason');
+
+    // Construct base URL
+    String urlStr = '$baseUrl/api/player-lifecycle/$playerId/pause?date=$dateStr&reason=$reason';
+
+    // 🔥 Append advanceAmount if provided
+    if (advanceAmount != null) {
+      urlStr += '&advanceAmount=$advanceAmount';
+    }
+
+    final url = Uri.parse(urlStr);
 
     final response = await http.post(url);
 
