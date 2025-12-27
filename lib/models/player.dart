@@ -13,8 +13,9 @@ class Player {
   final int? billingDay;
   final int? paymentCycleMonths;
 
-  // 🔥 NEW FIELD: Holiday/Left Status
+  // 🔥 NEW FIELDS: Holiday/Left Status & Wallet
   final bool isActive;
+  final double? creditBalance; // 🔥 NEW: Wallet Balance
 
   Player({
     required this.id,
@@ -28,7 +29,8 @@ class Player {
     this.notes,
     this.billingDay,
     this.paymentCycleMonths,
-    this.isActive = true, // Default to true (Active)
+    this.isActive = true,
+    this.creditBalance = 0.0, // 🔥 Default 0.0
   });
 
   factory Player.fromJson(Map<String, dynamic> json) {
@@ -45,7 +47,6 @@ class Player {
     }
 
     // 2. ID Parsing
-    // 1. Safe ID Parsing
     int idVal = 0;
     if (json['id'] != null) {
       if (json['id'] is int) {
@@ -98,30 +99,41 @@ class Player {
     if (pCycleRaw != null) {
       pCycle = (pCycleRaw is int) ? pCycleRaw : int.tryParse(pCycleRaw.toString());
     }
-    bool activeVal = true; // Default
+
+    // 9. Is Active Logic
+    bool activeVal = true;
     if (json['isActive'] != null) {
       activeVal = json['isActive'] as bool;
     } else if (json['is_active'] != null) {
-      // Sometimes raw SQL returns 1/0 instead of true/false
       if (json['is_active'] is int) {
         activeVal = json['is_active'] == 1;
       } else {
         activeVal = json['is_active'];
       }
     }
+
+    // 🔥 10. Credit Balance Parsing (NEW)
+    double creditVal = 0.0;
+    if (json['creditBalance'] != null) {
+      creditVal = (json['creditBalance'] as num).toDouble();
+    } else if (json['credit_balance'] != null) {
+      creditVal = (json['credit_balance'] as num).toDouble();
+    }
+
     return Player(
       id: idVal,
-      name: json['name'] ?? 'Unknown',      phone: json['phone'] ?? '',
+      name: json['name'] ?? 'Unknown',
+      phone: json['phone'] ?? '',
       group: groupVal,
       groupId: gid,
       age: ageVal,
       joinDate: jd,
       photoUrl: photo,
-
       notes: notesVal,
       billingDay: bDay,
       paymentCycleMonths: pCycle,
-      isActive: activeVal, // 🔥 Mapped here
+      isActive: activeVal,
+      creditBalance: creditVal, // 🔥 Mapped Here
     );
   }
 
@@ -137,6 +149,7 @@ class Player {
     'notes': notes,
     'billingDay': billingDay,
     'paymentCycleMonths': paymentCycleMonths,
-    'isActive': isActive, // 🔥 Added here
+    'isActive': isActive,
+    'creditBalance': creditBalance, // 🔥 Added Here
   };
 }

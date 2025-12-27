@@ -1,3 +1,4 @@
+import 'dart:async'; // 🔥 Required
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -13,6 +14,7 @@ import '../../services/data_manager.dart';
 // --- SCREENS ---
 import '../payments/payment_list_screen.dart';
 import '../payments/record_payment_screen.dart';
+import '../../utils/event_bus.dart'; // 🔥 Import EventBus
 
 class InstallmentsScreen extends StatefulWidget {
   final Player player;
@@ -38,14 +40,13 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
   List<int> _availableYears = [];
   int _selectedYear = DateTime.now().year;
 
+  // 🔥 Subscription Variable
+  late StreamSubscription<PlayerEvent> _eventSubscription;
 
   @override
   void initState() {
     super.initState();
-    print("📢 Opening Installments for Player ID: ${widget.player.id}"); // Debug Print
-
     if (widget.player.id == 0) {
-      print("❌ ERROR: Player ID is 0 or Invalid!");
       setState(() {
         _error = "Invalid Player Data";
         _isLoading = false;
@@ -57,6 +58,20 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
       _currentFilter = widget.initialFilter!;
     }
     _loadData();
+
+    // 🔥 Live Refresh Listener
+    _eventSubscription = EventBus().stream.listen((event) {
+      if (['updated', 'payment_recorded', 'installment_created'].contains(event.action)) {
+        debugPrint("🔄 Auto-refreshing History Screen due to event: ${event.action}");
+        _loadData(useCache: false);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _eventSubscription.cancel(); // Prevent Memory Leak
+    super.dispose();
   }
 
   Future<void> _loadData({bool useCache = true}) async {
@@ -87,7 +102,6 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
   void _processData(List<Installment> list) {
     if (!mounted) return;
 
-    // Sort: Latest Year -> Latest Month
     list.sort((a, b) {
       int yearComp = (b.periodYear ?? 0).compareTo(a.periodYear ?? 0);
       if (yearComp != 0) return yearComp;
@@ -108,7 +122,7 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
     });
   }
 
-  // --- BULK PAYMENT DIALOG ---
+  // ... (Bulk Payment Dialog Same as before) ...
   void _openBulkPayment(double maxPayableAmount) {
     final amountCtl = TextEditingController();
     final methodCtl = TextEditingController();
@@ -161,7 +175,7 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
                         }
 
                         DataManager().invalidatePlayerDetails(widget.player.id);
-                        _loadData(useCache: false);
+                        _loadData(useCache: false); // Will trigger refresh via event too but safe to call here
 
                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Payment Successful!"), backgroundColor: Colors.green));
                       } catch (e) {
@@ -206,7 +220,6 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
         final double remaining = (it.amount ?? 0) - (it.paidAmount ?? 0);
         final bool isPaid = (it.status ?? '').toUpperCase() == 'PAID';
         final bool isSkipped = (it.status ?? '').toUpperCase() == 'SKIPPED';
-        // Overdue mdhye Skipped/Holiday wale dakhvu naka
         return remaining > 0 && !isPaid && !isSkipped && it.dueDate != null && it.dueDate!.isBefore(today);
       }
       return true;
@@ -218,9 +231,7 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
     final displayList = _getFilteredList();
     double totalPendingOnScreen = 0;
     for (var i in displayList) {
-      // Pending Calculation mdhye SKIPPED count karu naka
       if ((i.status ?? '').toUpperCase() == 'SKIPPED' || (i.status ?? '').toUpperCase() == 'CANCELLED') continue;
-
       double total = i.amount ?? 0;
       double paid = i.paidAmount ?? 0;
       totalPendingOnScreen += (total - paid);
@@ -337,23 +348,21 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
       ),
     );
   }
+
+  // 🔥 UPDATED GLASS CARD (With Revert Logic)
   Widget _buildGlassCard(Installment it) {
     final double total = it.amount ?? 0.0;
     final double paid = it.paidAmount ?? 0.0;
 
-    // 🔥 1. STATUS FLAGS & WAIVED LOGIC
     final String statusStr = (it.status ?? '').toUpperCase();
-    final String notes = (it.notes ?? '').toLowerCase(); // Notes for checking Waived
+    final String notes = (it.notes ?? '').toLowerCase();
 
-    // Check if it is Waived (Left) or Just Holiday
     final bool isWaived = statusStr == 'SKIPPED' && (notes.contains('left') || notes.contains('waived'));
-    final bool isSkipped = statusStr == 'SKIPPED' && !isWaived; // True Holiday
-
+    final bool isSkipped = statusStr == 'SKIPPED' && !isWaived;
     final bool isCancelled = statusStr == 'CANCELLED';
     final bool isPaid = !isSkipped && !isWaived && !isCancelled && ((total - paid) <= 0 || statusStr == 'PAID');
     final bool isOverdue = !isSkipped && !isWaived && !isCancelled && !isPaid && it.dueDate != null && it.dueDate!.isBefore(DateTime.now());
 
-    // 🔥 2. DYNAMIC COLORS
     Color cardBgColor;
     Color textColor;
     Color subTextColor;
@@ -361,21 +370,18 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
     Color statusChipColor;
 
     if (isWaived || isCancelled) {
-      // ⛔ LEFT / WAIVED (Grey Box)
       cardBgColor = Colors.grey.shade400;
       textColor = Colors.black;
       subTextColor = Colors.black87;
       statusLabel = "LEFT";
       statusChipColor = Colors.black;
     } else if (isSkipped) {
-      // 🏖️ HOLIDAY (White Box)
       cardBgColor = Colors.white.withOpacity(0.95);
       textColor = Colors.black;
       subTextColor = Colors.black54;
       statusLabel = "HOLIDAY";
       statusChipColor = Colors.blueGrey;
     } else {
-      // 🟢 NORMAL (Glass Dark)
       cardBgColor = Colors.white.withOpacity(0.05);
       textColor = Colors.white;
       subTextColor = Colors.white54;
@@ -383,7 +389,6 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
       statusChipColor = isPaid ? Colors.greenAccent : (isOverdue ? Colors.redAccent : Colors.orangeAccent);
     }
 
-    // --- 🔥 BILL PERIOD TITLE LOGIC (UPDATED) ---
     int cycle = widget.player.paymentCycleMonths ?? 1;
     DateTime endDate = DateTime(it.periodYear ?? DateTime.now().year, it.periodMonth ?? 1);
     DateTime startDate;
@@ -417,14 +422,11 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // --- HEADER ROW ---
+                // HEADER
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      titleText,
-                      style: TextStyle(color: textColor, fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
+                    Text(titleText, style: TextStyle(color: textColor, fontSize: 18, fontWeight: FontWeight.bold)),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
@@ -438,51 +440,37 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
                 ),
                 const SizedBox(height: 12),
 
-                // --- MIDDLE CONTENT ---
+                // MIDDLE
                 if (isSkipped || isWaived || isCancelled)
-                // 🔥 CASE A: Holiday/Left -> Show Note Box
                   Container(
                     width: double.infinity,
                     margin: const EdgeInsets.only(top: 8),
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                        color: isSkipped ? Colors.blue.withOpacity(0.1) : Colors.red.withOpacity(0.1),
+                        color: isWaived ? Colors.grey.withOpacity(0.2) : Colors.blue.withOpacity(0.1),
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: isSkipped ? Colors.blue.withOpacity(0.3) : Colors.red.withOpacity(0.3))
+                        border: Border.all(color: Colors.black12)
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                            isSkipped ? "🏖️ Holiday Reason:" : "⛔ Reason:",
-                            style: TextStyle(fontSize: 11, color: subTextColor, fontWeight: FontWeight.bold)
-                        ),
+                        Text(isWaived ? "⛔ Reason:" : "🏖️ Holiday Reason:", style: TextStyle(fontSize: 11, color: subTextColor, fontWeight: FontWeight.bold)),
                         const SizedBox(height: 4),
-                        Text(
-                            it.notes != null && it.notes!.isNotEmpty ? it.notes! : "No reason provided",
-                            style: TextStyle(color: textColor, fontWeight: FontWeight.w600, fontSize: 14)
-                        ),
+                        Text(it.notes != null && it.notes!.isNotEmpty ? it.notes! : "No reason provided", style: TextStyle(color: textColor, fontWeight: FontWeight.w600, fontSize: 14)),
                       ],
                     ),
                   )
                 else
-                // 🔥 CASE B: Normal Bill -> Show Amount Rows
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       _infoCol("Amount", "₹${total.toInt()}", textColor, subTextColor),
                       _infoCol("Paid", "₹${paid.toInt()}", isPaid ? Colors.green : textColor, subTextColor),
-                      _infoCol(
-                          isPaid ? "Status" : "Due Date",
-                          isPaid ? "Paid" : (it.dueDate != null ? df.format(it.dueDate!) : "-"),
-                          isPaid ? Colors.green : (isOverdue ? Colors.redAccent : subTextColor),
-                          subTextColor
-                      ),
+                      _infoCol(isPaid ? "Status" : "Due Date", isPaid ? "Paid" : (it.dueDate != null ? df.format(it.dueDate!) : "-"), isPaid ? Colors.green : (isOverdue ? Colors.redAccent : subTextColor), subTextColor),
                     ],
                   ),
 
-                // --- FOOTER BUTTONS ---
-                // (Skip/Cancel/Waived asel tar 'Record' dakhvu naka)
+                // FOOTER
                 if (!isSkipped && !isCancelled && !isWaived) ...[
                   const SizedBox(height: 16),
                   Row(
@@ -496,44 +484,65 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
                       ),
                       const SizedBox(width: 12),
 
+                      // 🔥 LOGIC: Pay OR Revert
                       if (!isPaid)
                         Expanded(
                           child: ElevatedButton(
                             onPressed: () async {
-                              // Same payment logic...
+                              // Payment logic (Same as before)
                               int actualInstallmentId = it.id;
                               if (actualInstallmentId <= 0) {
-                                actualInstallmentId = await ApiService.findInstallmentId(
-                                  playerId: widget.player.id,
-                                  periodMonth: it.periodMonth ?? 0,
-                                  periodYear: it.periodYear ?? 0,
-                                );
+                                actualInstallmentId = await ApiService.findInstallmentId(playerId: widget.player.id, periodMonth: it.periodMonth ?? 0, periodYear: it.periodYear ?? 0);
                               }
                               if (actualInstallmentId > 0) {
-                                final res = await Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                        builder: (_) => RecordPaymentScreen(
-                                            installmentId: actualInstallmentId,
-                                            remainingAmount: total - paid
-                                        )
-                                    )
-                                );
+                                final res = await Navigator.push(context, MaterialPageRoute(builder: (_) => RecordPaymentScreen(installmentId: actualInstallmentId, remainingAmount: total - paid)));
                                 if (res == true) {
                                   DataManager().invalidatePlayerDetails(widget.player.id);
                                   _loadData(useCache: false);
                                 }
                               }
                             },
-                            style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.deepPurpleAccent,
-                                foregroundColor: Colors.white
-                            ),
+                            style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurpleAccent, foregroundColor: Colors.white),
                             child: const Text("Record"),
                           ),
                         )
                       else
-                        const Expanded(child: SizedBox())
+                      // 🔥 ADDED REVERT BUTTON FOR PAID BILLS
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () async {
+                              bool confirm = await showDialog(
+                                  context: context,
+                                  builder: (dCtx) => AlertDialog(
+                                    backgroundColor: const Color(0xFF203A43),
+                                    title: const Text("Revert Payment?", style: TextStyle(color: Colors.white)),
+                                    content: const Text("This will mark the bill as PENDING. Are you sure?", style: TextStyle(color: Colors.white70)),
+                                    actions: [
+                                      TextButton(onPressed: () => Navigator.pop(dCtx, false), child: const Text("Cancel")),
+                                      ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent), onPressed: () => Navigator.pop(dCtx, true), child: const Text("Yes, Revert"))
+                                    ],
+                                  )
+                              ) ?? false;
+
+                              if (confirm) {
+                                try {
+                                  int actualId = it.id;
+                                  if (actualId <= 0) {
+                                    actualId = await ApiService.findInstallmentId(playerId: widget.player.id, periodMonth: it.periodMonth ?? 0, periodYear: it.periodYear ?? 0);
+                                  }
+                                  await ApiService.revertPayment(actualId);
+                                  EventBus().fire(PlayerEvent('updated')); // Refresh
+                                  if(context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Payment Reverted!'), backgroundColor: Colors.orange));
+                                } catch (e) {
+                                  if(context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+                                }
+                              }
+                            },
+                            icon: const Icon(Icons.undo, size: 16, color: Colors.redAccent),
+                            label: const Text("Revert", style: TextStyle(color: Colors.redAccent)),
+                            style: OutlinedButton.styleFrom(side: BorderSide(color: Colors.redAccent.withOpacity(0.5))),
+                          ),
+                        )
                     ],
                   )
                 ] else ...[
@@ -546,6 +555,7 @@ class _InstallmentsScreenState extends State<InstallmentsScreen> {
       ),
     );
   }
+
   Widget _infoCol(String label, String value, Color valColor, Color labelColor) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

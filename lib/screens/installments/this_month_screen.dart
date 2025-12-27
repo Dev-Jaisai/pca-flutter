@@ -1,10 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
-
 import '../../models/player.dart';
 import '../../models/player_installment_summary.dart';
 import '../../services/data_manager.dart';
 import '../../widgets/PlayerSummaryCard.dart';
-
+import '../../utils/event_bus.dart';
+import '../home/edit_player_screen.dart';
 
 class ThisMonthScreen extends StatefulWidget {
   const ThisMonthScreen({super.key});
@@ -17,35 +18,64 @@ class _ThisMonthScreenState extends State<ThisMonthScreen> {
   bool _loading = true;
   List<Map<String, dynamic>> _displayList = [];
 
+  late StreamSubscription<PlayerEvent> _eventSubscription;
+
   @override
   void initState() {
     super.initState();
-    _loadThisMonthData();
+    _initialLoad();
+
+    // 🔥 FIX: Live Update Logic Improved
+    _eventSubscription = EventBus().stream.listen((event) {
+      if (['updated', 'payment_recorded', 'installment_created'].contains(event.action)) {
+        debugPrint("🔄 Auto-refreshing Screen: ${event.action}");
+
+        // ✅ CHANGE: Show Loading IMMEDIATELY (Don't show old data)
+        _loadThisMonthData(forceRefresh: true, showLoading: true);
+      }
+    });
   }
 
-  Future<void> _loadThisMonthData() async {
+  @override
+  void dispose() {
+    _eventSubscription.cancel();
+    super.dispose();
+  }
+
+  Future<void> _initialLoad() async {
+    // 1. Show Cache immediately (Instant)
+    await _loadThisMonthData(forceRefresh: false, showLoading: true);
+
+    // 2. Fetch Fresh Data (Background)
+    await _loadThisMonthData(forceRefresh: true, showLoading: false);
+  }
+
+  Future<void> _loadThisMonthData({required bool forceRefresh, bool showLoading = false}) async {
     if (!mounted) return;
-    setState(() => _loading = true);
+
+    // ✅ FIX: Force Loading Indicator if requested (Even if data exists)
+    if (showLoading) {
+      setState(() => _loading = true);
+    }
 
     try {
-      final allInstallments = await DataManager().getAllInstallments(forceRefresh: true);
+      // DataManager call
+      final allInstallments = await DataManager().getAllInstallments(forceRefresh: forceRefresh);
+
+      if (!forceRefresh && allInstallments.isEmpty) return;
+
       final allPlayers = await DataManager().getPlayers();
 
+      // --- Processing Logic ---
       final now = DateTime.now();
       final currentMonth = now.month;
       final currentYear = now.year;
 
-      // Group installments by player
       final Map<int, List<PlayerInstallmentSummary>> playerInstallmentsMap = {};
 
       for (var inst in allInstallments) {
         if (inst.playerId == null) continue;
-
-        final playerId = inst.playerId!;
-        if (!playerInstallmentsMap.containsKey(playerId)) {
-          playerInstallmentsMap[playerId] = [];
-        }
-        playerInstallmentsMap[playerId]!.add(inst);
+        playerInstallmentsMap.putIfAbsent(inst.playerId!, () => []).add(inst);
       }
 
       final List<Map<String, dynamic>> result = [];
@@ -54,26 +84,21 @@ class _ThisMonthScreenState extends State<ThisMonthScreen> {
         final playerId = player.id;
         final playerInstallments = playerInstallmentsMap[playerId] ?? [];
 
-        // Find installments for CURRENT MONTH ONLY
+        // Current Month Installments
         final currentMonthInstallments = playerInstallments.where((inst) {
           final dueDate = inst.dueDate;
           if (dueDate == null) return false;
-
           final status = (inst.status ?? '').toUpperCase();
 
-          // CURRENT MONTH च्या installments
           return dueDate.month == currentMonth &&
               dueDate.year == currentYear &&
               status != 'SKIPPED' &&
               status != 'CANCELLED';
-          // 🔥 CHANGE: PAID asel tari dakhavu (status wise color change hounar)
         }).toList();
 
         if (currentMonthInstallments.isNotEmpty) {
-          // Take the FIRST installment for this month
           final primaryInstallment = currentMonthInstallments.first;
 
-          // 🔥 CHANGE: Get ONLY current month installments for chips
           final currentMonthChips = currentMonthInstallments
               .where((inst) => inst.dueDate != null)
               .toList()
@@ -82,7 +107,7 @@ class _ThisMonthScreenState extends State<ThisMonthScreen> {
           result.add({
             'player': player,
             'summary': primaryInstallment,
-            'installments': currentMonthChips, // 🔥 फक्त current month चे chips
+            'installments': currentMonthChips,
           });
         }
       }
@@ -90,17 +115,13 @@ class _ThisMonthScreenState extends State<ThisMonthScreen> {
       if (mounted) {
         setState(() {
           _displayList = result;
-          _loading = false;
+          _loading = false; // ✅ Data loaded, hide spinner
         });
       }
 
     } catch (e) {
-      debugPrint("Error loading This Month data: $e");
-      if (mounted) {
-        setState(() {
-          _loading = false;
-        });
-      }
+      debugPrint("Error loading data: $e");
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -116,7 +137,7 @@ class _ThisMonthScreenState extends State<ThisMonthScreen> {
               'This Month Due',
               style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
             ),
-            if (_displayList.isNotEmpty)
+            if (!_loading && _displayList.isNotEmpty) // Hide count while loading
               Text(
                   "${_displayList.length} Players",
                   style: TextStyle(
@@ -129,10 +150,15 @@ class _ThisMonthScreenState extends State<ThisMonthScreen> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh, color: Colors.white),
+            onPressed: () => _loadThisMonthData(forceRefresh: true, showLoading: true),
+          )
+        ],
       ),
       body: Stack(
         children: [
-          // Background
           Container(
             decoration: const BoxDecoration(
               gradient: LinearGradient(
@@ -145,22 +171,16 @@ class _ThisMonthScreenState extends State<ThisMonthScreen> {
 
           SafeArea(
             child: _loading
+            // ✅ Loading Indicator (Visible during refresh)
                 ? const Center(child: CircularProgressIndicator(color: Colors.cyanAccent))
                 : _displayList.isEmpty
                 ? Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(
-                    Icons.check_circle_outline,
-                    size: 60,
-                    color: Colors.white.withOpacity(0.2),
-                  ),
+                  Icon(Icons.check_circle_outline, size: 60, color: Colors.white.withOpacity(0.2)),
                   const SizedBox(height: 16),
-                  const Text(
-                    'No dues this month',
-                    style: TextStyle(color: Colors.white54),
-                  ),
+                  const Text('No dues this month', style: TextStyle(color: Colors.white54)),
                 ],
               ),
             )
@@ -171,10 +191,23 @@ class _ThisMonthScreenState extends State<ThisMonthScreen> {
                 final item = _displayList[i];
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 12),
-                  child: PlayerSummaryCard(
-                    player: item['player'] as Player,
-                    summary: item['summary'] as PlayerInstallmentSummary,
-                    installments: item['installments'] as List<PlayerInstallmentSummary>,
+                  child: GestureDetector(
+                    // 🔥 CLICK ACTION: Go to Edit Player
+                    onTap: () async {
+                      // Navigate to Edit Screen
+                      await Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => EditPlayerScreen(player: item['player']))
+                      );
+                      // 🔥 Refresh when coming back (if user changed something)
+                      _loadThisMonthData(forceRefresh: true, showLoading: true);
+                    },
+                    child: PlayerSummaryCard(
+                      player: item['player'] as Player,
+                      summary: item['summary'] as PlayerInstallmentSummary,
+                      installments: item['installments'] as List<PlayerInstallmentSummary>,
+                      nextScreenFilter: 'ThisMonth',
+                    ),
                   ),
                 );
               },

@@ -56,6 +56,22 @@ class DataManager {
     }
   }
 
+  void clearCache() {
+    debugPrint("🧹 Clearing Cache (RAM + Installments)...");
+
+    // Clear RAM variables
+    _memAllInstallments = null; // 🔥 Most Important for Dashboard / AllInstallments
+    _memPlayerDetails.clear();  // Important for History
+    _memPayments.clear();       // Important for Payment List
+
+    // Optional: Clear players too if needed (पण generally नको)
+    // _memPlayers = null;
+
+    debugPrint("✅ Cache cleared successfully.");
+  }
+
+
+
   /// Loads heavy data in background when app starts
   Future<void> prefetchAllData() async {
     try {
