@@ -1,5 +1,5 @@
 class PlayerInstallmentSummary {
-  final int? installmentId; // Make sure this matches your JSON (sometimes it is 'id')
+  final int? installmentId;
   final int playerId;
   final String playerName;
   final String? phone;
@@ -11,12 +11,9 @@ class PlayerInstallmentSummary {
   final DateTime? dueDate;
   final String status;
   final DateTime? lastPaymentDate;
-
-  // 🔥 IMPORTANT FIELDS ADDED
   final int? paymentCycleMonths;
   final int? periodMonth;
   final int? periodYear;
-
   final String? notes;
 
   PlayerInstallmentSummary({
@@ -33,14 +30,12 @@ class PlayerInstallmentSummary {
     required this.status,
     this.lastPaymentDate,
     this.paymentCycleMonths,
-    // 🔥 Add to Constructor
     this.periodMonth,
     this.periodYear,
     this.notes,
   });
 
   factory PlayerInstallmentSummary.fromJson(Map<String, dynamic> json) {
-    // --- Helper to parse various number formats ---
     double parseDouble(dynamic value) {
       if (value == null) return 0.0;
       if (value is int) return value.toDouble();
@@ -48,14 +43,12 @@ class PlayerInstallmentSummary {
       return double.tryParse(value.toString()) ?? 0.0;
     }
 
-    // --- Helper to parse Dates safely ---
     DateTime? parseDate(dynamic value) {
       if (value == null) return null;
       if (value is String && value.isNotEmpty) {
         try {
           return DateTime.parse(value);
         } catch (e) {
-          // print("Date Parse Error: $value");
           return null;
         }
       }
@@ -63,22 +56,23 @@ class PlayerInstallmentSummary {
     }
 
     return PlayerInstallmentSummary(
-      // Handle ID mapping (sometimes backend sends 'id' or 'installmentId')
       installmentId: json['installmentId'] ?? json['id'],
       playerId: json['playerId'] ?? 0,
       playerName: json['playerName'] ?? 'Unknown',
       phone: json['phone'],
       groupName: json['groupName'],
       joinDate: parseDate(json['joinDate']),
-      installmentAmount: parseDouble(json['installmentAmount'] ?? json['amount']), // Check both keys
-      totalPaid: parseDouble(json['totalPaid'] ?? json['paidAmount']),
-      remaining: parseDouble(json['remaining'] ?? json['remainingAmount']),
+
+      // 🔥 FIX: Prioritize keys sent by Spring Boot DTO ('amount', 'paidAmount', 'remainingAmount')
+      installmentAmount: parseDouble(json['amount'] ?? json['installmentAmount']),
+      totalPaid: parseDouble(json['paidAmount'] ?? json['totalPaid']),
+      remaining: parseDouble(json['remainingAmount'] ?? json['remaining']),
+
       dueDate: parseDate(json['dueDate']),
       status: json['status'] ?? 'PENDING',
       lastPaymentDate: parseDate(json['lastPaymentDate']),
       paymentCycleMonths: json['paymentCycleMonths'],
       notes: json['notes'],
-      // 🔥🔥 MAPPING NEW FIELDS 🔥🔥
       periodMonth: json['periodMonth'],
       periodYear: json['periodYear'],
     );
@@ -101,7 +95,7 @@ class PlayerInstallmentSummary {
       'paymentCycleMonths': paymentCycleMonths,
       'periodMonth': periodMonth,
       'periodYear': periodYear,
-      'notes': notes, // 🔥 He add karu shakta (Optional for now)
+      'notes': notes,
     };
   }
 }

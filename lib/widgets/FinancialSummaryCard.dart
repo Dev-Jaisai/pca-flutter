@@ -19,11 +19,11 @@ class FinancialSummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      margin: const EdgeInsets.only(bottom: 16), // Space below header
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xFF6A11CB), Color(0xFF2575FC)],
+          colors: [Color(0xFF6A11CB), Color(0xFF2575FC)], // Purple-Blue Gradient
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -34,6 +34,7 @@ class FinancialSummaryCard extends StatelessWidget {
       ),
       child: Column(
         children: [
+          // Header Row
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -43,16 +44,18 @@ class FinancialSummaryCard extends StatelessWidget {
               ),
               if (countLabel != null)
                 Container(
-                  padding: const EdgeInsets.all(8),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(10)),
                   child: Text(
                     countLabel!,
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
                   ),
                 )
             ],
           ),
           const SizedBox(height: 20),
+
+          // Stats Row
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -67,15 +70,25 @@ class FinancialSummaryCard extends StatelessWidget {
   }
 
   Widget _buildSummaryItem(IconData icon, String label, double amount) {
+    // Format K for thousands (e.g. 5000 -> 5.0k)
+    String formattedAmount = amount >= 1000
+        ? "${(amount / 1000).toStringAsFixed(1)}k"
+        : amount.toInt().toString();
+
+    // Use specific colors for logic
+    Color iconColor = Colors.white70;
+    if (label == "Collected") iconColor = Colors.greenAccent;
+    if (label == "Remaining") iconColor = Colors.orangeAccent;
+
     return Column(
       children: [
-        Icon(icon, color: Colors.white70, size: 20),
+        Icon(icon, color: iconColor, size: 24),
         const SizedBox(height: 4),
         Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
         const SizedBox(height: 4),
         Text(
-          "₹${amount >= 1000 ? (amount / 1000).toStringAsFixed(1) + 'k' : amount.toInt()}",
-          style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+          "₹$formattedAmount",
+          style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
         ),
       ],
     );

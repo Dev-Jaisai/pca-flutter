@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../models/player.dart';
 import '../../models/player_installment_summary.dart';
 import '../../services/api_service.dart';
 import '../../services/data_manager.dart';
+import '../../utils/event_bus.dart';
 import '../../widgets/FinancialSummaryCard.dart';
 import '../../widgets/PlayerSummaryCard.dart'; // ✅ हे widget अपडेटेड असावे
 
@@ -24,6 +27,7 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
   String? _error;
   String _currentFilter = 'All';
   DateTime _selectedMonth = DateTime.now();
+  StreamSubscription<PlayerEvent>? _eventSubscription;
 
   @override
   void initState() {
@@ -36,32 +40,34 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
       _selectedMonth = DateTime(now.year, now.month + 1, 1);
     }
     _loadAllData();
+    // ✅ ADD EventBus Listener
+    _eventSubscription = EventBus().stream.listen((event) {
+      if (['updated', 'payment_recorded', 'installment_updated'].contains(event.action)) {
+        debugPrint("🔄 AllInstallments: Received ${event.action} event. Refreshing...");
+        _loadAllData();
+      }
+    });
   }
-
+  @override
+  void dispose() {
+    _eventSubscription?.cancel(); // ✅ ADD THIS
+    super.dispose();
+  }
   Future<void> _loadAllData() async {
     setState(() => _isLoading = true);
 
     try {
-      // 1. Fetch Players (Billing Day साठी हे गरजेचे आहे)
+      // 1. Fetch Players
       var players = await DataManager().getPlayers();
       if (players.isEmpty) {
         players = await ApiService.fetchPlayers();
         await DataManager().saveData(players, []);
       }
-      // Player Map बनवला (Fast Lookup साठी)
       final playerMap = {for (var p in players) p.id: p};
 
-      // 2. Fetch Installments
-      final cachedData = await DataManager().getCachedAllInstallments();
-      List<PlayerInstallmentSummary> rawList = [];
-
-      if (cachedData != null && cachedData.isNotEmpty) {
-        rawList = cachedData;
-      } else {
-        // Cache नसेल तर API कॉल करा
-        rawList = await ApiService.fetchAllInstallmentsSummary(page: 0, size: 5000);
-        await DataManager().saveAllInstallments(rawList);
-      }
+      // 2. 🔥 ALWAYS fetch fresh data from API (not cache)
+      final rawList = await ApiService.fetchAllInstallmentsSummary(page: 0, size: 5000);
+      await DataManager().saveAllInstallments(rawList);
 
       // 3. Process & Group Data
       if (mounted) {
@@ -70,8 +76,10 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
           _isLoading = false;
           _error = null;
         });
+        debugPrint("✅ AllInstallments: Data refreshed successfully");
       }
     } catch (e) {
+      debugPrint("❌ AllInstallments: Error loading data: $e");
       if (mounted) {
         setState(() {
           _isLoading = false;

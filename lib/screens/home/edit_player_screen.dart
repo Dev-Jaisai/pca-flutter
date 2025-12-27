@@ -333,13 +333,23 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
                 Navigator.pop(ctx);
                 setState(() => _loading = true);
                 try {
+
+                  // 🔥🔥🔥 FIX: Note मध्ये तारीख जोडा (Append Date)
+                  String userNote = noteCtl.text.trim();
+                  if (userNote.isEmpty) userNote = "Holiday"; // Default text
+
+                  // Date Formatting (e.g. 27 Dec 2025)
+                  String dateStr = DateFormat('dd MMM yyyy').format(selectedDate);
+
+                  // Final Note बनवा
+                  String finalNote = "$userNote (From: $dateStr)";
                   // Get credit amount from the text field
                   double finalCredit = double.tryParse(creditCtl.text) ?? 0.0;
 
                   await ApiService.pausePlayer(
                       widget.player.id,
                       selectedDate,
-                      noteCtl.text,
+                      finalNote, // 🔥 इथे अपडेटेड नोट पाठवा
                       advanceAmount: finalCredit // 🔥 Pass this new param
                   );
 
