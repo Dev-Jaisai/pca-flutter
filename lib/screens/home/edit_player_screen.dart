@@ -19,21 +19,17 @@ class EditPlayerScreen extends StatefulWidget {
 class _EditPlayerScreenState extends State<EditPlayerScreen> {
   final _formKey = GlobalKey<FormState>();
 
-  // Controllers
   late TextEditingController _nameCtl;
   late TextEditingController _phoneCtl;
   late TextEditingController _ageCtl;
   late TextEditingController _notesCtl;
 
-  // State Variables
   DateTime? _joinDate;
   int? _selectedGroupId;
   int _paymentCycleMonths = 1;
   DateTime? _newBillingDate;
 
-  // 🔥 Local State for Active/Inactive Toggle
   late bool _isActive;
-
   List<Group> _groups = [];
   bool _loading = false;
 
@@ -42,8 +38,6 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
     super.initState();
     _initializeFields();
     _fetchGroups();
-
-    // Sync status from server
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _checkRealStatus();
     });
@@ -101,21 +95,21 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
         "joinDate": _joinDate?.toIso8601String().split('T')[0],
         "notes": _notesCtl.text.trim(),
         "paymentCycleMonths": _paymentCycleMonths,
-        if (_newBillingDate != null)
-          "firstInstallmentDate": _newBillingDate?.toIso8601String().split('T')[0],
       };
+
+      // Billing date only if set
+      if (_newBillingDate != null) {
+        data["firstInstallmentDate"] = _newBillingDate?.toIso8601String().split('T')[0];
+      }
 
       await ApiService.updatePlayer(widget.player.id, data);
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Updated successfully'), backgroundColor: Colors.green));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Updated successfully'), backgroundColor: Colors.green));
         Navigator.pop(context, true);
       }
     } catch (e) {
-      if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -124,7 +118,6 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
   Future<void> _pickDate(bool isJoin) async {
     final now = DateTime.now();
     final initial = isJoin ? (_joinDate ?? now) : (_newBillingDate ?? now);
-
     final picked = await showDatePicker(
       context: context,
       initialDate: initial,
@@ -132,469 +125,383 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
       lastDate: DateTime(now.year + 5),
       builder: (ctx, child) => Theme(
         data: ThemeData.dark().copyWith(
-          colorScheme: const ColorScheme.dark(
-              primary: Colors.cyanAccent,
-              onPrimary: Colors.black,
-              surface: Color(0xFF203A43)),
+          colorScheme: const ColorScheme.dark(primary: Colors.cyanAccent, onPrimary: Colors.black, surface: Color(0xFF203A43)),
         ),
         child: child!,
       ),
     );
-
     if (picked != null) {
       setState(() {
-        if (isJoin) {
-          _joinDate = picked;
-        } else {
-          _newBillingDate = picked;
-        }
+        if (isJoin) _joinDate = picked;
+        else _newBillingDate = picked;
       });
     }
   }
 
-  // --- 🔥 UPDATED PAUSE DIALOG (Hybrid Logic) ---
+  // --- PAUSE DIALOG ---
   void _showPauseDialog() {
     final noteCtl = TextEditingController();
     final daysCtl = TextEditingController();
-    final creditCtl = TextEditingController(); // For displaying/editing final credit
-
+    final creditCtl = TextEditingController();
     DateTime selectedDate = DateTime.now();
-
-    // Logic State Variables
     bool isAutoCalculate = true;
-    double monthlyFee = 5000.0; // ⚠️ TODO: Fetch this dynamically if possible (e.g. from Group)
+    double monthlyFee = 5000.0;
     double calculatedCredit = 0.0;
     int daysInMonth = 30;
 
-    // Helper to calculate credit
     void calculateCredit(StateSetter setDialogState) {
       if (!isAutoCalculate) return;
-
       int absentDays = int.tryParse(daysCtl.text) ?? 0;
-
-      // Calculate days in the target month (Month of 'selectedDate')
-      // Logic: Get 1st day of next month, subtract 1 day.
-      DateTime firstDayNextMonth = (selectedDate.month < 12)
-          ? DateTime(selectedDate.year, selectedDate.month + 1, 1)
-          : DateTime(selectedDate.year + 1, 1, 1);
+      DateTime firstDayNextMonth = (selectedDate.month < 12) ? DateTime(selectedDate.year, selectedDate.month + 1, 1) : DateTime(selectedDate.year + 1, 1, 1);
       DateTime lastDayThisMonth = firstDayNextMonth.subtract(const Duration(days: 1));
-
-      daysInMonth = lastDayThisMonth.day; // e.g., 28, 30, 31
-
+      daysInMonth = lastDayThisMonth.day;
       double perDay = monthlyFee / daysInMonth;
       double total = perDay * absentDays;
-
       setDialogState(() {
         calculatedCredit = total;
-        creditCtl.text = total.toStringAsFixed(0); // Update the editable field
+        creditCtl.text = total.toStringAsFixed(0);
       });
     }
 
     showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (dialogContext, setDialogState) => AlertDialog(
-          backgroundColor: const Color(0xFF203A43),
-          title: const Text("🏖️ Mark on Holiday", style: TextStyle(color: Colors.white)),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  "Player will be INACTIVE. Advance credit will be applied to the next bill.",
-                  style: TextStyle(color: Colors.white70, fontSize: 12),
-                ),
-                const SizedBox(height: 16),
-
-                // 1. Start Date Picker
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text("Start Date:", style: TextStyle(color: Colors.white)),
-                  trailing: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                        border: Border.all(color: Colors.cyanAccent),
-                        borderRadius: BorderRadius.circular(4)),
-                    child: Text(DateFormat('dd MMM yyyy').format(selectedDate),
-                        style: const TextStyle(color: Colors.cyanAccent)),
+        context: context,
+        builder: (ctx) => StatefulBuilder(
+          builder: (ctx, setDialogState) => AlertDialog(
+            backgroundColor: const Color(0xFF203A43),
+            title: const Text("🏖️ Mark on Holiday", style: TextStyle(color: Colors.white)),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text("Player will be INACTIVE. Advance credit will be applied.", style: TextStyle(color: Colors.white70, fontSize: 12)),
+                  const SizedBox(height: 16),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text("Start Date:", style: TextStyle(color: Colors.white)),
+                    trailing: Text(DateFormat('dd MMM yyyy').format(selectedDate), style: const TextStyle(color: Colors.cyanAccent)),
+                    onTap: () async {
+                      final picked = await showDatePicker(context: ctx, initialDate: selectedDate, firstDate: DateTime(2023), lastDate: DateTime(2030));
+                      if(picked != null) setDialogState(() { selectedDate = picked; calculateCredit(setDialogState); });
+                    },
                   ),
-                  onTap: () async {
-                    final picked = await showDatePicker(
-                        context: dialogContext,
-                        initialDate: selectedDate,
-                        firstDate: DateTime(2023),
-                        lastDate: DateTime(2030));
-                    if (picked != null) {
-                      setDialogState(() {
-                        selectedDate = picked;
-                        calculateCredit(setDialogState); // Recalculate if month changes
-                      });
-                    }
-                  },
-                ),
-
-                const Divider(color: Colors.white24),
-
-                // 2. Reason Input
-                TextField(
-                  controller: noteCtl,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: const InputDecoration(
-                    labelText: "Reason (e.g. Village Trip)",
-                    labelStyle: TextStyle(color: Colors.white54),
-                    enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
-                    focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.cyanAccent)),
-                  ),
-                ),
-
-                const SizedBox(height: 20),
-
-                // 3. Auto-Calculate Toggle
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text("Auto-calculate Credit?", style: TextStyle(color: Colors.white)),
-                    Switch(
-                      value: isAutoCalculate,
-                      activeColor: Colors.cyanAccent,
-                      onChanged: (val) {
-                        setDialogState(() {
-                          isAutoCalculate = val;
-                          if (val) calculateCredit(setDialogState);
-                        });
-                      },
-                    )
-                  ],
-                ),
-
-                // 4. Days Input & Breakdown (Only if Auto is ON)
-                if (isAutoCalculate) ...[
                   TextField(
-                    controller: daysCtl,
-                    keyboardType: TextInputType.number,
+                    controller: noteCtl,
                     style: const TextStyle(color: Colors.white),
-                    decoration: const InputDecoration(
-                      labelText: "Days Absent",
-                      suffixText: "days",
-                      labelStyle: TextStyle(color: Colors.orangeAccent),
-                      enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.orangeAccent)),
-                      focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.orangeAccent)),
-                    ),
-                    onChanged: (_) => calculateCredit(setDialogState),
+                    decoration: const InputDecoration(labelText: "Reason", labelStyle: TextStyle(color: Colors.white54)),
                   ),
-
-                  // Calculation Breakdown Box
-                  Container(
-                    margin: const EdgeInsets.only(top: 10),
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                        color: Colors.black26,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.white12)
+                  const SizedBox(height: 10),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text("Auto-calculate?", style: TextStyle(color: Colors.white)),
+                      Switch(
+                        value: isAutoCalculate,
+                        activeColor: Colors.cyanAccent,
+                        onChanged: (val) { setDialogState(() { isAutoCalculate = val; if(val) calculateCredit(setDialogState); }); },
+                      )
+                    ],
+                  ),
+                  if(isAutoCalculate)
+                    TextField(
+                      controller: daysCtl,
+                      keyboardType: TextInputType.number,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: const InputDecoration(labelText: "Days Absent", labelStyle: TextStyle(color: Colors.orangeAccent)),
+                      onChanged: (_) => calculateCredit(setDialogState),
                     ),
-                    child: Column(
-                      children: [
-                        _calcRow("Monthly Fee", "₹${monthlyFee.toInt()}"),
-                        _calcRow("Days in Month", "$daysInMonth"),
-                        _calcRow("Per Day", "₹${(monthlyFee/daysInMonth).toStringAsFixed(2)}"),
-                        const Divider(color: Colors.white24, height: 10),
-                        _calcRow("Calculated Credit", "₹${calculatedCredit.toStringAsFixed(0)}", isBold: true),
-                      ],
-                    ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: creditCtl,
+                    keyboardType: TextInputType.number,
+                    style: const TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.bold),
+                    decoration: const InputDecoration(labelText: "Credit Amount (₹)", labelStyle: TextStyle(color: Colors.greenAccent)),
                   ),
                 ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.orangeAccent, foregroundColor: Colors.black),
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  setState(() => _loading = true);
+                  try {
+                    String dateStr = DateFormat('dd MMM yyyy').format(selectedDate);
+                    String finalNote = "${noteCtl.text.isEmpty ? "Holiday" : noteCtl.text} (From: $dateStr)";
+                    double finalCredit = double.tryParse(creditCtl.text) ?? 0.0;
 
+                    await ApiService.pausePlayer(widget.player.id, selectedDate, finalNote, advanceAmount: finalCredit);
+                    DataManager().clearCache();
+                    await _checkRealStatus();
+                    EventBus().fire(PlayerEvent('updated'));
+                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Paused!'), backgroundColor: Colors.green));
+                  } catch (e) {
+                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+                  } finally {
+                    if (mounted) setState(() => _loading = false);
+                  }
+                },
+                child: const Text("CONFIRM PAUSE"),
+              )
+            ],
+          ),
+        )
+    );
+  }
+
+  // --- ACTIVATE DIALOG ---
+  void _showActivateDialog() {
+    DateTime selectedDate = DateTime.now();
+    showDialog(
+        context: context,
+        builder: (ctx) => StatefulBuilder(
+          builder: (ctx, setDialogState) => AlertDialog(
+            backgroundColor: const Color(0xFF203A43),
+            title: const Text("▶️ Welcome Back!", style: TextStyle(color: Colors.white)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text("Player is returning! New bill will be generated.", style: TextStyle(color: Colors.white70, fontSize: 12)),
                 const SizedBox(height: 16),
-
-                // 5. Final Credit Amount (Always Editable)
-                TextField(
-                  controller: creditCtl,
-                  keyboardType: TextInputType.number,
-                  style: const TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.bold, fontSize: 18),
-                  decoration: const InputDecoration(
-                    labelText: "Final Credit Amount (₹)",
-                    labelStyle: TextStyle(color: Colors.greenAccent),
-                    prefixText: "₹ ",
-                    enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.greenAccent)),
-                    focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.greenAccent, width: 2)),
-                  ),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text("Return Date:", style: TextStyle(color: Colors.white)),
+                  trailing: Text(DateFormat('dd MMM yyyy').format(selectedDate), style: const TextStyle(color: Colors.greenAccent)),
+                  onTap: () async {
+                    final picked = await showDatePicker(context: ctx, initialDate: selectedDate, firstDate: DateTime(2023), lastDate: DateTime(2030));
+                    if(picked != null) setDialogState(() => selectedDate = picked);
+                  },
                 ),
               ],
             ),
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text("Cancel", style: TextStyle(color: Colors.white54))),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.orangeAccent, foregroundColor: Colors.black),
-              onPressed: () async {
-                Navigator.pop(ctx);
-                setState(() => _loading = true);
-                try {
-
-                  // 🔥🔥🔥 FIX: Note मध्ये तारीख जोडा (Append Date)
-                  String userNote = noteCtl.text.trim();
-                  if (userNote.isEmpty) userNote = "Holiday"; // Default text
-
-                  // Date Formatting (e.g. 27 Dec 2025)
-                  String dateStr = DateFormat('dd MMM yyyy').format(selectedDate);
-
-                  // Final Note बनवा
-                  String finalNote = "$userNote (From: $dateStr)";
-                  // Get credit amount from the text field
-                  double finalCredit = double.tryParse(creditCtl.text) ?? 0.0;
-
-                  await ApiService.pausePlayer(
-                      widget.player.id,
-                      selectedDate,
-                      finalNote, // 🔥 इथे अपडेटेड नोट पाठवा
-                      advanceAmount: finalCredit // 🔥 Pass this new param
-                  );
-
-                  DataManager().clearCache();
-                  await _checkRealStatus();
-
-                  EventBus().fire(PlayerEvent('updated'));
-                  EventBus().fire(PlayerEvent('installment_created'));
-
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Paused! Credit of ₹${finalCredit.toInt()} saved.'), backgroundColor: Colors.green),
-                    );
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.greenAccent, foregroundColor: Colors.black),
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  setState(() => _loading = true);
+                  try {
+                    await ApiService.activatePlayer(widget.player.id, selectedDate);
+                    DataManager().clearCache();
+                    await _checkRealStatus();
+                    EventBus().fire(PlayerEvent('updated'));
+                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Player Activated!'), backgroundColor: Colors.green));
+                  } catch (e) {
+                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+                  } finally {
+                    if (mounted) setState(() => _loading = false);
                   }
-                } catch (e) {
-                  if (mounted)
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
-                } finally {
-                  if (mounted) setState(() => _loading = false);
-                }
-              },
-              child: const Text("CONFIRM PAUSE"),
-            )
-          ],
-        ),
-      ),
-    );
-  }
-
-  // Helper for breakdown rows
-  Widget _calcRow(String label, String val, {bool isBold = false}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
-          Text(val, style: TextStyle(color: isBold ? Colors.cyanAccent : Colors.white, fontSize: 12, fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
-        ],
-      ),
-    );
-  }
-
-  void _showActivateDialog() {
-    DateTime selectedDate = DateTime.now();
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (dialogContext, setDialogState) => AlertDialog(
-          backgroundColor: const Color(0xFF203A43),
-          title: const Text("▶️ Welcome Back!", style: TextStyle(color: Colors.white)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                "Player is returning! A new bill will be generated starting from this date.",
-                style: TextStyle(color: Colors.white70, fontSize: 12),
-              ),
-              const SizedBox(height: 16),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text("Return Date:", style: TextStyle(color: Colors.white)),
-                trailing: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(border: Border.all(color: Colors.greenAccent), borderRadius: BorderRadius.circular(4)),
-                  child: Text(DateFormat('dd MMM yyyy').format(selectedDate), style: const TextStyle(color: Colors.greenAccent)),
-                ),
-                onTap: () async {
-                  final picked = await showDatePicker(
-                      context: dialogContext,
-                      initialDate: selectedDate,
-                      firstDate: DateTime(2023),
-                      lastDate: DateTime(2030));
-                  if (picked != null)
-                    setDialogState(() => selectedDate = picked);
                 },
-              ),
+                child: const Text("ACTIVATE"),
+              )
             ],
           ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel", style: TextStyle(color: Colors.white54))),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.greenAccent, foregroundColor: Colors.black),
-              onPressed: () async {
-                Navigator.pop(ctx);
-                setState(() => _loading = true);
-                try {
-                  await ApiService.activatePlayer(widget.player.id, selectedDate);
-                  DataManager().clearCache();
-                  await _checkRealStatus();
-                  EventBus().fire(PlayerEvent('updated'));
-                  EventBus().fire(PlayerEvent('installment_created'));
-
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Player Activated & Bill Generated!")));
-                  }
-                } catch (e) {
-                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red));
-                } finally {
-                  if (mounted) setState(() => _loading = false);
-                }
-              },
-              child: const Text("ACTIVATE"),
-            )
-          ],
-        ),
-      ),
+        )
     );
   }
 
+  // --- MARK LEFT DIALOG ---
   void _showMarkLeftDialog() {
-    DateTime selectedDate = DateTime.now();
+    DateTime? existingDate = _getExistingLeftDate();
+    DateTime selectedDate = existingDate ?? DateTime.now();
+    // DateTime selectedDate = DateTime.now();
     String selectedOption = 'COLLECT_FULL';
     final amountCtl = TextEditingController();
     bool showAmountField = false;
 
     showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (dialogContext, setDialogState) => AlertDialog(
-          backgroundColor: const Color(0xFF203A43),
-          title: const Text("⛔ Mark as Left", style: TextStyle(color: Colors.redAccent)),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text("Future bills will be deleted. Select the date they left:", style: TextStyle(color: Colors.white70, fontSize: 12)),
-                const SizedBox(height: 10),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text("Left Date:", style: TextStyle(color: Colors.white)),
-                  trailing: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(border: Border.all(color: Colors.redAccent), borderRadius: BorderRadius.circular(4)),
-                    child: Text(DateFormat('dd MMM yyyy').format(selectedDate), style: const TextStyle(color: Colors.redAccent)),
-                  ),
-                  onTap: () async {
-                    final picked = await showDatePicker(
-                        context: dialogContext,
-                        initialDate: selectedDate,
-                        firstDate: DateTime(2023),
-                        lastDate: DateTime(2030));
-                    if (picked != null)
-                      setDialogState(() => selectedDate = picked);
-                  },
-                ),
-                const Divider(color: Colors.white24),
-                const Text("Settlement Option:", style: TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold)),
-                RadioListTile<String>(
-                  title: const Text("Collect Full Fee", style: TextStyle(color: Colors.white, fontSize: 14)),
-                  subtitle: const Text("Keep original bill amount", style: TextStyle(color: Colors.white54, fontSize: 10)),
-                  value: 'COLLECT_FULL',
-                  groupValue: selectedOption,
-                  activeColor: Colors.cyanAccent,
-                  contentPadding: EdgeInsets.zero,
-                  onChanged: (val) => setDialogState(() { selectedOption = val!; showAmountField = false; }),
-                ),
-                RadioListTile<String>(
-                  title: const Text("Collect Partial Fee", style: TextStyle(color: Colors.white, fontSize: 14)),
-                  subtitle: const Text("Enter custom amount", style: TextStyle(color: Colors.white54, fontSize: 10)),
-                  value: 'COLLECT_PARTIAL',
-                  groupValue: selectedOption,
-                  activeColor: Colors.orangeAccent,
-                  contentPadding: EdgeInsets.zero,
-                  onChanged: (val) => setDialogState(() { selectedOption = val!; showAmountField = true; }),
-                ),
-                if (showAmountField)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8.0),
-                    child: TextField(
-                      controller: amountCtl,
-                      keyboardType: TextInputType.number,
-                      style: const TextStyle(color: Colors.white),
-                      decoration: const InputDecoration(
-                        labelText: "Enter Final Amount (₹)",
-                        labelStyle: TextStyle(color: Colors.orangeAccent),
-                        enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.orangeAccent)),
-                        focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.orangeAccent)),
+        context: context,
+        builder: (ctx) => StatefulBuilder(
+          builder: (ctx, setDialogState) => AlertDialog(
+            backgroundColor: const Color(0xFF203A43),
+            title: Text(
+              !widget.player.isActive ? "🖊️ Update Exit Details" : "⛔ Mark as Left",
+              style: const TextStyle(color: Colors.white),
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (!widget.player.isActive)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                          color: Colors.blue.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.blueAccent)
+                      ),
+                      child: const Text(
+                        "ℹ️ You are updating details. If you change the MONTH, please use 'Undo Left' instead.",
+                        style: TextStyle(color: Colors.white70, fontSize: 11),
                       ),
                     ),
+
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text("Left Date:", style: TextStyle(color: Colors.white)),
+                    trailing: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(border: Border.all(color: Colors.white54), borderRadius: BorderRadius.circular(8)),
+                      child: Text(DateFormat('dd MMM yyyy').format(selectedDate), style: const TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold)),
+                    ),
+                    onTap: () async {
+                      final picked = await showDatePicker(
+                          context: ctx,
+                          initialDate: selectedDate,
+                          firstDate: DateTime(2023),
+                          lastDate: DateTime(2030)
+                      );
+                      if (picked != null) setDialogState(() => selectedDate = picked);
+                    },
                   ),
-                RadioListTile<String>(
-                  title: const Text("Waive Off (Cancel Bill)", style: TextStyle(color: Colors.white, fontSize: 14)),
-                  subtitle: const Text("Set amount to 0", style: TextStyle(color: Colors.white54, fontSize: 10)),
-                  value: 'WAIVE_OFF',
-                  groupValue: selectedOption,
-                  activeColor: Colors.redAccent,
-                  contentPadding: EdgeInsets.zero,
-                  onChanged: (val) => setDialogState(() { selectedOption = val!; showAmountField = false; }),
-                ),
-              ],
+
+                  // ... (Radio Buttons code same as before) ...
+                  RadioListTile<String>(title: const Text("Collect Full Fee", style: TextStyle(color: Colors.white, fontSize: 14)), value: 'COLLECT_FULL', groupValue: selectedOption, activeColor: Colors.cyanAccent, onChanged: (val) => setDialogState(() { selectedOption = val!; showAmountField = false; })),
+                  RadioListTile<String>(title: const Text("Collect Partial Fee", style: TextStyle(color: Colors.white, fontSize: 14)), value: 'COLLECT_PARTIAL', groupValue: selectedOption, activeColor: Colors.orangeAccent, onChanged: (val) => setDialogState(() { selectedOption = val!; showAmountField = true; })),
+
+                  if(showAmountField)
+                    TextField(
+                        controller: amountCtl,
+                        keyboardType: TextInputType.number,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: const InputDecoration(
+                            labelText: "Final Total Settlement Amount (₹)",
+                            helperText: "Enter the final agreed amount",
+                            labelStyle: TextStyle(color: Colors.orangeAccent)
+                        )
+                    ),
+
+                  RadioListTile<String>(title: const Text("Waive Off", style: TextStyle(color: Colors.white, fontSize: 14)), value: 'WAIVE_OFF', groupValue: selectedOption, activeColor: Colors.redAccent, onChanged: (val) => setDialogState(() { selectedOption = val!; showAmountField = false; })),
+                ],
+              ),
             ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: !widget.player.isActive ? Colors.blueAccent : Colors.redAccent, foregroundColor: Colors.white),
+                onPressed: () async {
+
+                  // 🔥🔥🔥 SMART WARNING LOGIC (NEW) 🔥🔥🔥
+                  // जर प्लेयर आधीच Inactive असेल (Update Mode) आणि महिना बदलला असेल
+                  if (!widget.player.isActive && existingDate != null) {
+                    if (existingDate.month != selectedDate.month || existingDate.year != selectedDate.year) {
+
+                      // ⚠️ Show Blocking Alert
+                      showDialog(
+                          context: context,
+                          builder: (alertCtx) => AlertDialog(
+                            backgroundColor: const Color(0xFF1E2A38),
+                            title: const Row(children: [Icon(Icons.warning, color: Colors.orange), SizedBox(width: 10), Text("Month Changed!", style: TextStyle(color: Colors.white))]),
+                            content: const Text(
+                              "You are changing the billing month (e.g. Sep -> Oct).\n\nDirect update is risky for accounting.\nPlease use 'UNDO LEFT' first, then mark left with the new date.",
+                              style: TextStyle(color: Colors.white70),
+                            ),
+                            actions: [
+                              TextButton(
+                                  onPressed: () => Navigator.pop(alertCtx),
+                                  child: const Text("OK, I'll Undo", style: TextStyle(color: Colors.cyanAccent))
+                              )
+                            ],
+                          )
+                      );
+                      return; // ⛔ Stop here. Don't call API.
+                    }
+                  }
+                  // ---------------------------------------------
+
+                  Navigator.pop(ctx);
+                  _confirmMarkLeft(selectedDate, selectedOption, amountCtl.text);
+                },
+                child: Text(!widget.player.isActive ? "UPDATE" : "CONFIRM"),
+              )
+            ],
           ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel", style: TextStyle(color: Colors.white54))),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
-              onPressed: () async {
-                Navigator.pop(ctx);
-                _confirmMarkLeft(selectedDate, selectedOption, amountCtl.text);
-              },
-              child: const Text("CONFIRM LEFT"),
-            )
-          ],
-        ),
-      ),
+        )
     );
   }
 
   Future<void> _confirmMarkLeft(DateTime date, String option, String amount) async {
     setState(() => _loading = true);
     try {
-      await ApiService.markPlayerLeft(widget.player.id, date, option, amount);
+      double? amt = double.tryParse(amount);
+
+      // 🔥 Capture the message returned by API
+      String message = await ApiService.markPlayerLeft(widget.player.id, date, option, amt);
+
       DataManager().clearCache();
       EventBus().fire(PlayerEvent('updated'));
-      EventBus().fire(PlayerEvent('installment_created'));
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ Player Marked as LEFT!'), backgroundColor: Colors.red));
+        // 🔥 Show the Backend Message in SnackBar
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(message, style: const TextStyle(fontWeight: FontWeight.bold)),
+              backgroundColor: message.contains("REFUND") ? Colors.redAccent : Colors.green, // Refund असेल तर लाल, नाहीतर हिरवा
+              duration: const Duration(seconds: 4), // थोडा जास्त वेळ ठेवा
+            )
+        );
         Navigator.pop(context, true);
       }
     } catch (e) {
-      String errorMsg = e.toString().replaceAll("Exception: ", "");
-      if (mounted) {
-        showDialog(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text("⚠️ Action Blocked", style: TextStyle(color: Colors.orangeAccent)),
-            content: Text(errorMsg, style: const TextStyle(fontSize: 16)),
-            actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("OK"))],
-          ),
-        );
-      }
+      if (mounted) showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text("Action Blocked"), content: Text(e.toString()), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("OK"))]));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
+// 🔥 Helper: जुन्या Note मधून 'LEFT Date' शोधणे
+  DateTime? _getExistingLeftDate() {
+    if (widget.player.notes == null) return null;
+    try {
+      // Note format: "... | LEFT: 2025-09-12"
+      final regex = RegExp(r'LEFT: (\d{4}-\d{2}-\d{2})');
+      final match = regex.firstMatch(widget.player.notes!);
+      if (match != null) {
+        return DateTime.parse(match.group(1)!);
+      }
+    } catch (e) {
+      debugPrint("Error parsing date: $e");
+    }
+    return null;
+  }
+  void _undoLeftProcess() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E2A38),
+        title: const Text("Undo 'Left' Status?", style: TextStyle(color: Colors.white)),
+        content: const Text("This will restore the player to ACTIVE state and un-cancel future bills.", style: TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.orangeAccent, foregroundColor: Colors.black),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              setState(() => _loading = true);
+              try {
+                await ApiService.undoPlayerLeft(widget.player.id);
+                DataManager().clearCache();
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Action Undone! Player is Active."), backgroundColor: Colors.green));
+                  Navigator.pop(context, true);
+                }
+              } catch (e) {
+                if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red));
+              } finally {
+                if (mounted) setState(() => _loading = false);
+              }
+            },
+            child: const Text("CONFIRM UNDO"),
+          ),
+        ],
+      ),
+    );
+  }
 
-  // ... (build and helper widgets same as before) ...
   @override
   Widget build(BuildContext context) {
-    // Note: Same UI code as your previous version for build(), just referencing new methods
-    final df = DateFormat('dd MMM yyyy');
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(title: const Text('Edit Player', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)), backgroundColor: Colors.transparent, elevation: 0, iconTheme: const IconThemeData(color: Colors.white)),
@@ -651,12 +558,15 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
                               children: [
                                 Icon(_isActive ? Icons.check_circle : Icons.pause_circle_filled, color: _isActive ? Colors.greenAccent : Colors.redAccent),
                                 const SizedBox(width: 8),
-                                Text(_isActive ? "STATUS: ACTIVE" : "STATUS: ON HOLIDAY (INACTIVE)", style: TextStyle(color: _isActive ? Colors.greenAccent : Colors.redAccent, fontWeight: FontWeight.bold)),
+                                Text(_isActive ? "STATUS: ACTIVE" : "STATUS: INACTIVE / LEFT", style: TextStyle(color: _isActive ? Colors.greenAccent : Colors.redAccent, fontWeight: FontWeight.bold)),
                               ],
                             ),
                           ),
                           const SizedBox(height: 16),
+
+                          // 🔥🔥🔥 UPDATED BUTTON LOGIC (FULL) 🔥🔥🔥
                           if (_isActive) ...[
+                            // ACTIVE State
                             SizedBox(
                               width: double.infinity,
                               child: OutlinedButton.icon(
@@ -676,7 +586,39 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
                                 onPressed: _showMarkLeftDialog,
                               ),
                             ),
-                          ] else
+                          ] else ...[
+                            // 🔥 INACTIVE State (3 Options) 🔥
+
+                            // 1. UPDATE EXIT DETAILS (New Blue Button)
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton.icon(
+                                icon: const Icon(Icons.edit, size: 20),
+                                label: const Text("UPDATE EXIT DETAILS"),
+                                style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.blueAccent,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))
+                                ),
+                                onPressed: _showMarkLeftDialog, // 🔥 Calls same dialog to update
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+
+                            // 2. UNDO LEFT
+                            SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                icon: const Icon(Icons.undo, size: 20),
+                                label: const Text("UNDO LEFT (Restore Active)"),
+                                style: OutlinedButton.styleFrom(foregroundColor: Colors.orangeAccent, side: const BorderSide(color: Colors.orangeAccent), padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                                onPressed: _undoLeftProcess,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+
+                            // 3. ACTIVATE
                             SizedBox(
                               width: double.infinity,
                               child: ElevatedButton.icon(
@@ -686,6 +628,8 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
                                 onPressed: _showActivateDialog,
                               ),
                             ),
+                          ],
+
                           const SizedBox(height: 25),
                           const Divider(color: Colors.white24),
                           const SizedBox(height: 16),
