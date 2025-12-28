@@ -103,34 +103,42 @@ class ApiService {
       throw Exception(
           'Failed to delete player: ${response.statusCode} - ${response.body}');
     }
-  }static Future<void> markPlayerLeft(int playerId, DateTime date, String option, String? amount) async {
+  }
+// 🔥🔥🔥 FIX: Return Type 'String' केला आहे (void च्या जागी) 🔥🔥🔥
+  static Future<String> markPlayerLeft(int playerId, DateTime date, String option, double? amount) async {
     final dateStr = date.toIso8601String().split('T')[0];
+
+    // URL Construction
     String urlStr = '$baseUrl/api/player-lifecycle/$playerId/left?date=$dateStr&option=$option';
-    if (amount != null && amount.isNotEmpty) {
-      urlStr += '&amount=$amount';
+
+    if (amount != null) {
+      urlStr += '&amount=${amount.toString()}';
     }
+
+    print("Calling API: $urlStr");
 
     final response = await http.post(
       Uri.parse(urlStr),
       headers: {'Content-Type': 'application/json'},
     );
 
-    if (response.statusCode != 200) {
-      // 🔥 Extract clean message from backend response
-      // Backend error format is usually verbose, let's try to get the message part
-      String errorMessage = response.body;
+    // 🔥🔥🔥 CHANGE HERE: Success असल्यास Body (Message) रिटर्न करा 🔥🔥🔥
+    if (response.statusCode == 200) {
+      return response.body; // Backend कडून आलेला मेसेज (Refund Warning)
+    }
 
-      // Jar JSON format madhye error aala asel tar parse kara (optional)
+    // Error Handling
+    else {
+      String errorMessage = response.body;
       try {
         final Map<String, dynamic> errorJson = json.decode(response.body);
         if (errorJson.containsKey('message')) {
           errorMessage = errorJson['message'];
+        } else if (errorJson.containsKey('error')) {
+          errorMessage = errorJson['error'];
         }
-      } catch (_) {
-        // If not JSON, use raw body
-      }
+      } catch (_) {}
 
-      // Throw clean error
       throw Exception(errorMessage);
     }
   }
@@ -455,6 +463,17 @@ class ApiService {
 
     if (response.statusCode != 200) {
       throw Exception('Failed to revert payment: ${response.body}');
+    }
+  }
+// 🔥🔥🔥 FIX: Added '/api' to the URL 🔥🔥🔥
+  static Future<void> undoPlayerLeft(int playerId) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/player-lifecycle/$playerId/undo-left'), // ✅ Added /api
+      headers: {'Content-Type': 'application/json'},
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to undo left status: ${response.body}');
     }
   }
   // Create single installment for a player (optional endpoint on your backend)

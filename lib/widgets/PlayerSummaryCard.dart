@@ -40,11 +40,10 @@ class _PlayerSummaryCardState extends State<PlayerSummaryCard> {
     final Color statusColor = BillingHelper.getStatusColor(status, isOverdue);
     final Color cardBg = const Color(0xFF1E2A38).withOpacity(0.9);
 
-    // 🔥 FIX: Filter List - Hide REFUNDED & CANCELLED from Dashboard Card
+    // Filter List - Hide REFUNDED & CANCELLED from Dashboard Card
     final sortedInstallments = List<PlayerInstallmentSummary>.from(widget.installments)
         .where((inst) {
       String s = (inst.status ?? '').toUpperCase();
-      // Refunded आणि Cancelled दोन्ही लपवा
       return s != 'CANCELLED';    })
         .toList();
 
@@ -85,7 +84,7 @@ class _PlayerSummaryCardState extends State<PlayerSummaryCard> {
                         children: [
                           Text(widget.player.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
 
-                          // 🔥 Only call this ONCE
+                          // Status Badge
                           if (!widget.player.isActive)
                             _buildStatusBadge(),
                         ],
@@ -94,22 +93,113 @@ class _PlayerSummaryCardState extends State<PlayerSummaryCard> {
                       Text("${widget.player.group ?? 'No Group'} • Bill Day: ${widget.player.billingDay ?? 1}", style: const TextStyle(fontSize: 12, color: Colors.white54)),
                     ],
                   ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                    decoration: BoxDecoration(
-                      color: statusColor.withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: statusColor),
-                    ),
-                    child: Text(
-                      "Total Due: ₹${widget.summary.remaining?.toInt() ?? 0}",
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: statusColor),
-                    ),
+
+                  // 🔥🔥🔥 NEW SMART BADGE LOGIC 🔥🔥🔥
+                  // ... (Header Text संपल्यावर) ...
+
+                  // 🔥🔥🔥 SMART DUAL BADGE (Refund + Due) 🔥🔥🔥
+                  Builder(
+                      builder: (context) {
+                        double totalRefund = 0.0;
+                        double totalDue = widget.summary.remaining ?? 0.0;
+
+                        // 1. Calculate Total Refund Amount
+                        for (var inst in widget.installments) {
+                          if (inst.totalPaid > (inst.installmentAmount ?? 0)) {
+                            totalRefund += (inst.totalPaid - (inst.installmentAmount ?? 0));
+                          }
+                        }
+
+                        // 2. Build Column for Badges (Refund + Due can coexist)
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            // 🟣 REFUND BADGE (Priority 1)
+                            if (totalRefund > 0)
+                              Container(
+                                margin: const EdgeInsets.only(bottom: 4),
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                decoration: BoxDecoration(
+                                  color: Colors.purpleAccent.withOpacity(0.15),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.purpleAccent),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.arrow_upward, size: 14, color: Colors.purpleAccent), // ⬆️ Arrow
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      "REFUND: ₹${totalRefund.toInt()}",
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.purpleAccent,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+
+                            // 🟠 DUE BADGE (Priority 2)
+                            if (totalDue > 0)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                decoration: BoxDecoration(
+                                  color: Colors.orangeAccent.withOpacity(0.15),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.orangeAccent),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.arrow_downward, size: 14, color: Colors.orangeAccent), // ⬇️ Arrow
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      "COLLECT: ₹${totalDue.toInt()}",
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.orangeAccent,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+
+                            // 🟢 ALL CLEAR (Only if nothing above)
+                            if (totalRefund == 0 && totalDue == 0)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                decoration: BoxDecoration(
+                                  color: Colors.greenAccent.withOpacity(0.15),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.greenAccent),
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.check, size: 14, color: Colors.greenAccent),
+                                    SizedBox(width: 4),
+                                    Text(
+                                      "ALL CLEAR",
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.greenAccent,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        );
+                      }
                   )
                 ],
               ),
 
-              // 🔥 Credit Balance Row (Wallet)
+              // Credit Balance Row (Wallet)
               if ((widget.player.creditBalance ?? 0) > 0) ...[
                 const SizedBox(height: 12),
                 Container(
@@ -180,6 +270,7 @@ class _PlayerSummaryCardState extends State<PlayerSummaryCard> {
                   ),
                   const SizedBox(width: 12),
 
+                  // 🔥 Refund Button Logic (Optional: Show Pay Now only if no refund)
                   if ((widget.summary.remaining ?? 0) > 0)
                     Expanded(
                       child: ElevatedButton(
@@ -211,7 +302,7 @@ class _PlayerSummaryCardState extends State<PlayerSummaryCard> {
     );
   }
 
-  // 🔥 Helper: Dynamic Status Badge (Left vs Holiday)
+  // Helper: Dynamic Status Badge
   Widget _buildStatusBadge() {
     bool isLeft = false;
     for (var inst in widget.installments) {
@@ -250,11 +341,9 @@ class _PlayerSummaryCardState extends State<PlayerSummaryCard> {
     final bool isPaid = status == 'PAID';
     final bool isOverdue = !isPaid && !isSkipped && !isWaived && inst.dueDate != null && inst.dueDate!.isBefore(DateTime.now());
 
-    // 🔥 NEW STATUS FLAGS
     final bool isRefunded = status == 'REFUNDED';
     final bool isCancelled = status == 'CANCELLED';
 
-    // Corner Logic: Left Emoji or Wallet/Credit Icon
     final bool showLeftEmoji = !player.isActive && notes.contains('left');
     final bool showHolidayIcon = isSkipped || (notes.contains('holiday') || notes.contains('credit'));
 
@@ -265,15 +354,9 @@ class _PlayerSummaryCardState extends State<PlayerSummaryCard> {
     if (isWaived) {
       chipColor = Colors.grey.shade700; textColor = Colors.white70; mainIcon = Icons.person_off;
     } else if (isRefunded) {
-      // 💸 REFUNDED STYLE (Purple)
-      chipColor = Colors.purpleAccent;
-      textColor = Colors.white;
-      mainIcon = Icons.replay;
+      chipColor = Colors.purpleAccent; textColor = Colors.white; mainIcon = Icons.replay;
     } else if (isCancelled) {
-      // 🚫 CANCELLED STYLE (Grey/Red)
-      chipColor = Colors.red.withOpacity(0.2);
-      textColor = Colors.white70;
-      mainIcon = Icons.block;
+      chipColor = Colors.red.withOpacity(0.2); textColor = Colors.white70; mainIcon = Icons.block;
     } else if (isSkipped) {
       chipColor = Colors.cyanAccent.withOpacity(0.9); textColor = Colors.black; mainIcon = Icons.beach_access;
     } else if (isPaid) {
@@ -292,7 +375,6 @@ class _PlayerSummaryCardState extends State<PlayerSummaryCard> {
         child: Stack(
           clipBehavior: Clip.none,
           children: [
-            // Main Chip Body
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
@@ -309,40 +391,22 @@ class _PlayerSummaryCardState extends State<PlayerSummaryCard> {
                 ],
               ),
             ),
-
-            // Corner Emoji: Left (Runner)
             if (showLeftEmoji)
               Positioned(
-                top: -6,
-                right: -6,
+                top: -6, right: -6,
                 child: Container(
                   padding: const EdgeInsets.all(2),
-                  decoration: const BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                      boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 2)]
-                  ),
+                  decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle, boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 2)]),
                   child: const Text("🏃‍♂️", style: TextStyle(fontSize: 10)),
                 ),
               ),
-
-            // Corner Icon: Credit (Wallet) or Holiday (Umbrella)
             if (showHolidayIcon && !isSkipped && !showLeftEmoji)
               Positioned(
-                top: -4,
-                right: -4,
+                top: -4, right: -4,
                 child: Container(
                   padding: const EdgeInsets.all(2),
-                  decoration: const BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                      boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 2)]
-                  ),
-                  child: Icon(
-                      notes.contains('credit') ? Icons.account_balance_wallet : Icons.beach_access,
-                      size: 10,
-                      color: notes.contains('credit') ? Colors.green : Colors.blueAccent
-                  ),
+                  decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle, boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 2)]),
+                  child: Icon(notes.contains('credit') ? Icons.account_balance_wallet : Icons.beach_access, size: 10, color: notes.contains('credit') ? Colors.green : Colors.blueAccent),
                 ),
               ),
           ],
@@ -356,7 +420,6 @@ class _PlayerSummaryCardState extends State<PlayerSummaryCard> {
     final status = (inst.status ?? '').toUpperCase();
     final String notes = (inst.notes ?? '').toLowerCase();
 
-    // Logic
     final bool isWaived = status == 'SKIPPED' && (notes.contains('left') || notes.contains('waived'));
     final bool isSkipped = status == 'SKIPPED' && !isWaived;
     final bool isPaid = status == 'PAID';
@@ -408,22 +471,12 @@ class _PlayerSummaryCardState extends State<PlayerSummaryCard> {
                 _buildStatusBox("⛔ WAIVED OFF / LEFT:", inst.notes ?? "Student Left Academy.", Colors.grey),
               ],
 
-              // 5. REFUNDED DETAILS
               if (status == 'REFUNDED') ...[
-                _buildStatusBox(
-                    "💸 PAYMENT REFUNDED:",
-                    inst.notes ?? "Payment has been refunded.",
-                    Colors.purpleAccent
-                ),
+                _buildStatusBox("💸 PAYMENT REFUNDED:", inst.notes ?? "Payment has been refunded.", Colors.purpleAccent),
               ],
 
-              // 6. CANCELLED DETAILS
               if (status == 'CANCELLED') ...[
-                _buildStatusBox(
-                    "🚫 BILL CANCELLED:",
-                    inst.notes ?? "Bill cancelled (Player Left).",
-                    Colors.redAccent
-                ),
+                _buildStatusBox("🚫 BILL CANCELLED:", inst.notes ?? "Bill cancelled (Player Left).", Colors.redAccent),
               ],
 
               if (isSkipped) ...[
@@ -432,6 +485,18 @@ class _PlayerSummaryCardState extends State<PlayerSummaryCard> {
 
               if (isPaid) ...[
                 _buildPaidBox(),
+
+                // 🔥🔥🔥 NEW: REFUND WARNING IN CHIP SHEET 🔥🔥🔥
+                if (inst.totalPaid > (inst.installmentAmount ?? 0)) ...[
+                  const SizedBox(height: 12),
+                  _buildStatusBox(
+                      "⚠️ REFUND DUE:",
+                      "Refund Amount: ₹${(inst.totalPaid - (inst.installmentAmount ?? 0)).toStringAsFixed(0)}",
+                      Colors.redAccent
+                  ),
+                ],
+                // ------------------------------------------------
+
                 const SizedBox(height: 16),
                 _buildRevertButton(ctx, inst),
               ],
