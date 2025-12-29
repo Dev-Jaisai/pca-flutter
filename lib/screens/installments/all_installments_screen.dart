@@ -100,7 +100,6 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
             p.dueDate!.month == _selectedMonth.month;
       }).toList();
     } else {
-      // 'All' filter -> Sagle gheun taka, group logic handle karel
       filteredList = rawList;
     }
 
@@ -122,71 +121,86 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
 
       final player = playerMap[pid]!;
 
-      // Calculate Totals per Player
+      // 🔥🔥🔥 NEW CALCULATION LOGIC STARTS HERE 🔥🔥🔥
       double totalPaid = 0;
       double totalRemaining = 0;
       double totalAmount = 0;
 
-      // Find 'Main' status logic
       String mainStatus = 'PAID';
       DateTime? latestPaymentDate;
 
-      // Sort Installments: Latest First (Newest Month Top)
+      // Sort Installments: Latest First
       installments.sort((a, b) {
         DateTime dateA = a.dueDate ?? DateTime(2000);
         DateTime dateB = b.dueDate ?? DateTime(2000);
         return dateB.compareTo(dateA);
       });
-
       for (var inst in installments) {
-        totalAmount += (inst.installmentAmount ?? 0);
-        totalPaid += inst.totalPaid;
-        totalRemaining += (inst.remaining ?? 0);
+        // 1. CANCELLED बिलांना हिशोबात घेऊ नका
+        if ((inst.status ?? '').toUpperCase() == 'CANCELLED') continue;
 
-        // Status Logic: Jar ekjari pending asel tar status PENDING
-        if ((inst.remaining ?? 0) > 0) {
+        bool isRefunded = (inst.status ?? '').toUpperCase() == 'REFUNDED';
+
+        // 🔥🔥🔥 FIX: TARGET AMOUNT (Refunded असेल तर Target मध्ये ऍड करू नका) 🔥🔥🔥
+        if (!isRefunded) {
+          totalAmount += (inst.installmentAmount ?? 0);
+        }
+
+        // 3. COLLECTED CALCULATION (Net Logic)
+        double actualPaid = inst.totalPaid;
+        double fee = inst.installmentAmount ?? 0;
+
+        if (actualPaid > fee) {
+          totalPaid += fee; // फक्त 2000 पकडा
+        } else {
+          totalPaid += actualPaid; // नॉर्मल 5000 पकडा
+        }
+
+        // 4. REMAINING CALCULATION
+        if (!isRefunded) {
+          totalRemaining += (inst.remaining ?? 0);
+        }
+
+        // Status Logic
+        if ((inst.remaining ?? 0) > 0 && !isRefunded) {
           mainStatus = 'PENDING';
         }
 
-        // Jar Latest Payment Date update karaychi asel
         if (inst.lastPaymentDate != null) {
           if (latestPaymentDate == null || inst.lastPaymentDate!.isAfter(latestPaymentDate)) {
             latestPaymentDate = inst.lastPaymentDate;
           }
         }
       }
+      // 🔥🔥🔥 LOGIC ENDS 🔥🔥🔥
 
-      // Special: Jar overdue asel tar status OVERDUE kara (Check latest due date)
       if (installments.isNotEmpty && totalRemaining > 0) {
         if (installments.first.dueDate != null && installments.first.dueDate!.isBefore(DateTime.now())) {
-          // mainStatus logic PlayerSummaryCard madhye ahe, pan ethe PENDING thevla tari chalel
+          // mainStatus logic handled visually in card
         }
       }
 
-      // Latest Installment (Header saathi)
       final latestInst = installments.isNotEmpty ? installments.first : null;
 
-      // Create Aggregate Summary
       final summary = PlayerInstallmentSummary(
           playerId: pid,
           playerName: player.name,
-          totalPaid: totalPaid,
+          totalPaid: totalPaid, // ✅ Now this is "Net Collected"
           installmentAmount: totalAmount,
-          remaining: totalRemaining,
+          remaining: totalRemaining, // ✅ Now this excludes Refunded/Cancelled
           status: mainStatus,
           lastPaymentDate: latestPaymentDate,
-          dueDate: latestInst?.dueDate, // Latest date pass kara
+          dueDate: latestInst?.dueDate,
           installmentId: latestInst?.installmentId
       );
 
       result.add({
         'player': player,
         'summary': summary,
-        'installments': installments // 🔥 List pass kara chips sathi
+        'installments': installments
       });
     });
 
-    // D. Final Sort (Jyanche paise baki ahet te var)
     result.sort((a, b) {
       double remA = (a['summary'] as PlayerInstallmentSummary).remaining ?? 0;
       double remB = (b['summary'] as PlayerInstallmentSummary).remaining ?? 0;
@@ -195,7 +209,6 @@ class _AllInstallmentsScreenState extends State<AllInstallmentsScreen> {
 
     _groupedList = result;
   }
-
   // ... (Summary Stats Calculation) ...
   Map<String, double> _calculateStats() {
     double expected = 0, collected = 0, pending = 0;
