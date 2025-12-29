@@ -565,14 +565,14 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
                           const SizedBox(height: 16),
 
                           // 🔥🔥🔥 UPDATED BUTTON LOGIC (FULL) 🔥🔥🔥
+                          // 🔥🔥🔥 SIMPLIFIED & POWERFUL LOGIC 🔥🔥🔥
                           if (_isActive) ...[
-                            // ACTIVE State
+                            // 1. ACTIVE STATE
                             SizedBox(
                               width: double.infinity,
                               child: OutlinedButton.icon(
                                 icon: const Icon(Icons.beach_access, size: 20),
                                 label: const Text("MARK ON HOLIDAY / PAUSE"),
-                                style: OutlinedButton.styleFrom(foregroundColor: Colors.orangeAccent, side: const BorderSide(color: Colors.orangeAccent), padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
                                 onPressed: _showPauseDialog,
                               ),
                             ),
@@ -582,49 +582,61 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
                               child: ElevatedButton.icon(
                                 icon: const Icon(Icons.person_off, size: 20),
                                 label: const Text("MARK AS LEFT ACADEMY"),
-                                style: ElevatedButton.styleFrom(backgroundColor: Colors.red.withOpacity(0.2), foregroundColor: Colors.redAccent, side: BorderSide(color: Colors.redAccent.withOpacity(0.5)), padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                                style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
                                 onPressed: _showMarkLeftDialog,
                               ),
                             ),
                           ] else ...[
-                            // 🔥 INACTIVE State (3 Options) 🔥
+                            // 2. INACTIVE STATE (Holiday OR Left)
 
-                            // 1. UPDATE EXIT DETAILS (New Blue Button)
+                            // A. UPDATE / OVERWRITE EXIT (Works for both Holiday & Left)
                             SizedBox(
                               width: double.infinity,
                               child: ElevatedButton.icon(
-                                icon: const Icon(Icons.edit, size: 20),
-                                label: const Text("UPDATE EXIT DETAILS"),
+                                icon: const Icon(Icons.edit_note, size: 20),
+                                label: const Text("UPDATE EXIT / MARK LEFT"), // 🔥 हे नाव बदलले
                                 style: ElevatedButton.styleFrom(
                                     backgroundColor: Colors.blueAccent,
                                     foregroundColor: Colors.white,
                                     padding: const EdgeInsets.symmetric(vertical: 14),
                                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))
                                 ),
-                                onPressed: _showMarkLeftDialog, // 🔥 Calls same dialog to update
+                                onPressed: _showMarkLeftDialog, // 🔥 हेच डायलॉग वापरा!
                               ),
                             ),
                             const SizedBox(height: 12),
 
-                            // 2. UNDO LEFT
-                            SizedBox(
-                              width: double.infinity,
-                              child: OutlinedButton.icon(
-                                icon: const Icon(Icons.undo, size: 20),
-                                label: const Text("UNDO LEFT (Restore Active)"),
-                                style: OutlinedButton.styleFrom(foregroundColor: Colors.orangeAccent, side: const BorderSide(color: Colors.orangeAccent), padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                                onPressed: _undoLeftProcess,
+                            // B. UNDO ACTIONS (Smart Switch)
+                            if ((widget.player.notes ?? "").contains("Holiday") || (widget.player.notes ?? "").contains("Paused"))
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  icon: const Icon(Icons.restore, size: 20),
+                                  label: const Text("CANCEL HOLIDAY (Undo)"),
+                                  style: OutlinedButton.styleFrom(foregroundColor: Colors.cyanAccent, side: const BorderSide(color: Colors.cyanAccent)),
+                                  onPressed: _undoPauseProcess,
+                                ),
+                              )
+                            else
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  icon: const Icon(Icons.undo, size: 20),
+                                  label: const Text("UNDO LEFT (Restore Active)"),
+                                  style: OutlinedButton.styleFrom(foregroundColor: Colors.orangeAccent, side: const BorderSide(color: Colors.orangeAccent)),
+                                  onPressed: _undoLeftProcess,
+                                ),
                               ),
-                            ),
+
                             const SizedBox(height: 12),
 
-                            // 3. ACTIVATE
+                            // C. ACTIVATE (Common)
                             SizedBox(
                               width: double.infinity,
                               child: ElevatedButton.icon(
                                 icon: const Icon(Icons.play_arrow, size: 20),
                                 label: const Text("ACTIVATE PLAYER (RESUME)"),
-                                style: ElevatedButton.styleFrom(backgroundColor: Colors.greenAccent, foregroundColor: Colors.black, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                                style: ElevatedButton.styleFrom(backgroundColor: Colors.greenAccent, foregroundColor: Colors.black),
                                 onPressed: _showActivateDialog,
                               ),
                             ),
@@ -656,7 +668,44 @@ class _EditPlayerScreenState extends State<EditPlayerScreen> {
       ),
     );
   }
+// 🔥🔥🔥 NEW: UNDO PAUSE / HOLIDAY FUNCTION 🔥🔥🔥
+  void _undoPauseProcess() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E2A38),
+        title: const Text("Cancel Holiday?", style: TextStyle(color: Colors.white)),
+        content: const Text("This will restore the skipped bill to PENDING and activate the player.", style: TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.cyanAccent, foregroundColor: Colors.black),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              setState(() => _loading = true);
+              try {
+                // Call API
+                await ApiService.undoPause(widget.player.id);
 
+                DataManager().clearCache();
+                EventBus().fire(PlayerEvent('updated'));
+
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Holiday Cancelled! Bill Restored."), backgroundColor: Colors.green));
+                  Navigator.pop(context, true);
+                }
+              } catch (e) {
+                if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red));
+              } finally {
+                if (mounted) setState(() => _loading = false);
+              }
+            },
+            child: const Text("CONFIRM"),
+          ),
+        ],
+      ),
+    );
+  }
   Widget _neonTextField(TextEditingController ctl, String label, IconData icon, {TextInputType type = TextInputType.text, int maxLines = 1}) {
     return TextFormField(
       controller: ctl,

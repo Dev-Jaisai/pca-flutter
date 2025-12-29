@@ -263,7 +263,19 @@ class ApiService {
           'Failed to create installment: ${response.statusCode} - ${response.body}');
     }
   }
+// 🔥 UNDO PAUSE / HOLIDAY
+  static Future<void> undoPause(int playerId) async {
+    final url = Uri.parse('$baseUrl/api/player-lifecycle/$playerId/undo-pause');
 
+    final response = await http.post(
+      url,
+      headers: {'Content-Type': 'application/json'},
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to undo pause: ${response.body}');
+    }
+  }
   // ---------------- Fee Structures ----------------
   static Future<List<FeeStructure>> fetchFeesByGroup(int groupId) async {
     final url = Uri.parse('$baseUrl/api/fees/group/$groupId');
